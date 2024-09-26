@@ -1,0 +1,312 @@
+---
+title: "Reservoir Water Clarity: Long-Term Intrannual Trends"
+output: html_document
+toc: true  
+toc_float: true 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+source("C:/Users/andre/my_functions.R")
+
+```
+
+```{r, message = FALSE}
+# Load the data
+data <- read_csv("Data/processed_dataset.csv")
+
+```
+
+# Visualizing Time series with Model Fits
+
+From Paul: "  I have come up with a list of 33 stations (below) for which I would like you to generate time series plots for variables that have at least 10 years of data inclusive of CHLa, Secchi, TN, DIN, TP and TSS.  In the output file, the plots should be organized by station (e.g., CHLa, TN and Secchi for station 1, then station 2, etc.), so I can compare trends.  Note that these plots should be based on the May-Oct average values and show the model line with slope and p statistics."
+
+
+### Vectorize the station IDs
+
+```{r}
+secchi_stations1 <- unlist(strsplit("2-APP020.23 2-LCN000.20 2-PKC001.84 2-SPE000.17 4ACRR008.32", " "))
+secchi_stations2 <- unlist(strsplit("4ABSA000.62 4ABWR002.50 4ABWR010.55 4ABWR017.42 4ACCK001.80 4ACOA000.60 4AGIL002.39 4AROA158.22 4AROA163.76 4AROA167.34 4AROA175.63 4AROA180.21 4AROA183.64 4AROA192.94 4AROA196.05 4AWTH000.40 9-NEW087.14 9-NEW089.34 9-NEW092.66 9-NEW098.32 9-PKC000.00 9-PKC004.16", " "))
+chlaTrends_stations <- c("4AROA038.49", "8-NAR047.69", "8-NAR054.17", "9-PKC004.16")
+secchiTrends_stations <- c("1BCRO009.19", "4ASRE046.90")
+
+stations_of_interest_10yrs <- c(secchi_stations2, chlaTrends_stations, secchiTrends_stations)
+all33_stations <- c(secchi_stations1, secchi_stations2, chlaTrends_stations, secchiTrends_stations)
+
+
+# Subset data to only include these stations
+data.sbst <- data %>% 
+  filter(STATION_ID %in% stations_of_interest_10yrs) %>%
+  select(-PHOSPHORUS_ORTHO, -TURBIDITY_HACH, TURBIDITY_NTU, AMMONIA_TOTAL, NITRATE_TOTAL)
+
+```
+
+### Derive May-Oct averages
+
+Yearly means for each variable at each station iff that variable has >= 10 years of data.
+
+```{r, message=FALSE}
+# Workflow:
+# loop through each station
+# loop through each variable and determine if there are at least 10 unique years of data, and if so, determine for how many of those years there are at least 3 observations per year
+
+vars <- c("CHLa", "SECCHI_DEPTH", "NITROGEN_TOTAL", "DIN", "PHOSPHORUS_TOTAL", "TSS")
+
+stationAvgs_10yrs <- list()
+
+for (station in unique(stations_of_interest_10yrs)) {
+  
+  station_avgs <- list()
+  
+  for (variable in vars) {
+    # Filter for current station and include only non-NA values of current var
+    data.sbst_station_variable <- data.sbst %>%
+      filter(STATION_ID == station) %>%
+      filter(!is.na(!!sym(variable))) # dynamically reference the variable
+
+    # Confirm at least 10 yrs of data
+    if (length(unique(data.sbst_station_variable$Year)) >= 10) {
+      # Determine which years have at least 3 obs/yr
+      years_with_3_obs <- data.sbst_station_variable %>%
+        group_by(Year) %>%
+        summarise(n = sum(!is.na(!!sym(variable)))) %>%
+        filter(n >= 3)
+
+      if (nrow(years_with_3_obs) >= 10) {
+        # Calculate May-Oct average for the current station and variable
+        data.sbst_station_variable <- data.sbst_station_variable %>%
+          filter(Year %in% years_with_3_obs$Year) %>% # Only include years with >= 3 obs
+          group_by(Year, STATION_ID) %>%
+          summarise(MAY_OCT_AVG = mean(!!sym(variable), na.rm = TRUE))
+
+        # Add the May-Oct average for variable to the station_avgs list
+        station_avgs[[variable]] <- data.sbst_station_variable
+      }
+    }
+  }
+  # Add all variables for the current station to the all_stations_avgs list
+  stationAvgs_10yrs[[station]] <- station_avgs
+}
+
+
+# ---------- Secchi Stations with < 10 yrs ------------------
+# There are 5 stations for which we are allowing inclusion in trend estimates despite having < 10 years of data.
+secchi_only <- data %>%
+  filter(STATION_ID %in% secchi_stations1)
+
+secchiOnly_avgs <- list()
+
+# Loop through each station and identify which years have Nobs >= 3
+for (station in secchi_stations1) {
+  station_data <- secchi_only %>%
+    filter(STATION_ID == station)
+  
+    # Determine which years have at least 3 obs/yr
+      secchiYrs_3_obs <- station_data %>%
+        group_by(Year) %>%
+        summarise(n = sum(!is.na(SECCHI_DEPTH))) %>%
+        filter(n >= 3)
+
+    # Calculate May-Oct average for the current station and variable
+        mayOct_avgs <- station_data %>%
+          filter(Year %in% secchiYrs_3_obs$Year) %>% # Only include years with >= 3 obs
+          group_by(Year, STATION_ID) %>%
+          summarise(MAY_OCT_AVG = mean(SECCHI_DEPTH, na.rm = TRUE))
+    
+    secchiOnly_avgs[[station]] <- list(SECCHI_DEPTH = mayOct_avgs)
+      
+}
+
+# Combine to make single list of all monthly averages
+monthlyAvgs_complete <- c(stationAvgs_10yrs, secchiOnly_avgs)
+
+```
+
+### Run MBLM for each station and variable
+
+Each station is stored as a list in `all_stations_avgs`. Each station list contains a list of variables with May-Oct averages for each year containing at least 3 observations of that variable.
+
+#### Custom function to derive trends
+
+```{r, warning = FALSE}
+trends_func <- function(station, variable) {
+  
+  modelSummary <- list()  
+  
+  df <- monthlyAvgs_complete[[station]][[variable]]
+  
+  # Remove NA values -- there should not be any, but just in case.
+  df <- df %>%
+    filter(!is.na(MAY_OCT_AVG)) %>%
+    ungroup()
+  
+  # Run mblm model
+  model <- mblm::mblm(MAY_OCT_AVG ~ Year, data = df)
+  mod.sum <- mblm::summary.mblm(model)
+          
+  # Store results (directly, without creating the combined station-variable name)
+  modelSummary <- list(
+    slope = mod.sum$coefficients[2, 1],
+    MAD = mod.sum$coefficients["Year", "MAD"],
+    pvalue = mod.sum$coefficients["Year", 4],
+    intercept = mod.sum$coefficients[1, 1]
+  )
+  
+  return(modelSummary)  # Return the results
+}
+
+# ------- Run custom function in for loop -------
+# Loop through each variable and run the function. This generates a heavily nested list structure trends_results -> list for each variable -> each variable has lists for each station_month -> each station_month list contains 1 list with 4 elements (the model results)
+
+# Trends for all stations/variables with 10+ yr and 3+ obs/yr
+trends_results <- list()
+
+for (station in unique(all33_stations)) {
+  for (variable in vars) {
+    if (variable %in% names(monthlyAvgs_complete[[station]])) {
+  trends_results[[station]][[variable]] <- trends_func(station, variable)
+    }
+  }
+}
+
+```
+
+
+#### Extract Regression Statistics into single table
+
+```{r `regression stats`}
+regression_statistics <- list()
+
+for (station in unique(all33_stations)) {
+      
+  modelSums <- trends_results[[station]]
+  
+      reg.df <- data.frame(STATION_ID = station,
+                           variable = vars[vars %in% names(monthlyAvgs_complete[[station]])],
+               model_slope = rep(NA, length(monthlyAvgs_complete[[station]])),
+               model_MAD = rep(NA, length(monthlyAvgs_complete[[station]])),
+               model_pval = rep(NA, length(monthlyAvgs_complete[[station]])),
+               model_intercept = rep(NA, length(monthlyAvgs_complete[[station]])))
+      
+  for (i in seq_along(monthlyAvgs_complete[[station]])) {
+      
+        p <- modelSums[[i]]
+      
+        reg.df$model_slope[i] <-  p$slope
+        reg.df$model_MAD[i] <-  p$MAD
+        reg.df$model_pval[i] <-  p$pvalue
+        reg.df$model_intercept[i] <-  p$intercept
+      }
+      
+      regression_statistics[[paste(station)]] <- reg.df
+}
+  
+
+# ------- Create data frames from lists -------
+regressions_df <- bind_rows(regression_statistics) # 28 stations with >= 10 yrs data
+
+write_csv(regressions_df, "data/longTerm_Annual_Regression_Statistics.csv")
+
+```
+
+## Plotting
+
+I initially created sample plot based on one station and variable and tried to incorporate the trend line using geom_abline. This worked in our reservoir plots. However, in this case the trend line did not appear. There was no error thrown, so I assume that for some reason the line was being plotted outside the bounds of the plot axes.
+
+What may have happened:
+geom_abline() expects an intercept and slope that apply globally across the x-axis, but if there's a mismatch between the scaling of the intercept and the x-axis (in this case, years starting at 2000), it may fail to display correctly.
+By manually drawing the line with geom_segment(), I can specify the exact x and y coordinates, which resolves the issue.
+
+#### Adjusted model intercept
+
+Because the model intercept is based on x=0, and the x-axes are somewhere between 1980 and 200x, I created an adjusted model intercept based on the following formula:
+
+`adjusted_intercept = model_intercept + model_slope * min(Year)`
+
+This required first determining the minimum year for each variable at each station
+
+```{r}
+minYear <- list()
+
+for (station in unique(all33_stations)) {
+  # Filter variables that exist in the current station
+  station_vars <- vars[vars %in% names(monthlyAvgs_complete[[station]])]
+  
+  # Initialize the data frame for storing minimum years
+  minYear.df <- data.frame(STATION_ID = station,
+                           variable = station_vars,
+                           minYear = rep(NA, length(station_vars)))
+  
+  # Loop through the variables and calculate the minimum year
+  for (i in seq_along(station_vars)) {
+    var <- station_vars[i]
+    minYear.df$minYear[i] <- min(monthlyAvgs_complete[[station]][[var]]$Year, na.rm = TRUE)
+  }
+  
+  # Store the data frame for this station
+  minYear[[station]] <- minYear.df
+}
+
+minYear.df <- bind_rows(minYear)
+
+```
+
+Then using that data frame to calculate the adjusted intercept
+
+```{r}
+regressions_adjusted <- regressions_df %>%
+  left_join(minYear.df, by = c("STATION_ID", "variable")) %>%
+  mutate(adjusted_intercept = model_intercept + model_slope * minYear)
+
+```
+
+
+
+```{r, fig.width=3, fig.height=4}
+library(ggplot2)
+# use regressions_adjusted along with the monthly averages list
+# monthly avg list structure: list[[station]]$variable  variable = df with Year, STATION_ID, MAY_OCT_AVG
+
+# List to hold all plots 
+all_plots_list <- list()
+
+for (station in names(monthlyAvgs_complete)) {
+  # Initiate list to store plots for this station
+  station_plots <- list()
+  
+  for (current_var in names(monthlyAvgs_complete[[station]])) {
+    df_avgs <- monthlyAvgs_complete[[station]][[current_var]]
+    df_reg <- regressions_adjusted %>%
+      filter(variable == current_var, STATION_ID == station)
+    
+    var_plot <- ggplot(df_avgs, aes(x = Year, y = MAY_OCT_AVG)) +
+      geom_point() +
+        # Use annotate() instead of aes() inside geom_segment for the trend line. ggplot expects each aesthetic  to be mapped to a column in the data, and geom_segment() - which I originally used - was receiving values (x, xend, y, and yend) that had only a single length, while the data (df_avgs) has multiple rows.  Using `annotate` eliminates the warning because it explicitly adds a line based on single values (rather than having ggplot2 try to match them to rows in df_avgs)
+      annotate("segment", x = min(df_avgs$Year), 
+               xend = max(df_avgs$Year), 
+               y = df_reg$adjusted_intercept, 
+               yend = 
+                 df_reg$adjusted_intercept + df_reg$model_slope * (max(df_avgs$Year) - min(df_avgs$Year)),
+               # calculate the y-value at the endpoint by adding the total change in y (slope * difference_in_years) to the intercept at the starting point
+               color = "red", linewidth = .42, alpha = .6) +
+      labs(title = current_var,
+           subtitle = paste("Slope: ", round(df_reg$model_slope, 5),
+                            "\np-value: ", round(df_reg$model_pval, 5)),
+           x = "Year", y = NULL) +
+      theme_minimal() +
+      theme(plot.title = element_text(face = "bold"))
+    
+    station_plots[[current_var]] <- var_plot
+  }
+
+  all_plots_list[[station]] <- station_plots
+}
+
+
+
+save(all_plots_list, file = "all_plots_list.RData")
+
+```
+
