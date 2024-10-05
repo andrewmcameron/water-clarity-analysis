@@ -1,0 +1,309 @@
+---
+title: "Publication Plot(s)"
+author: "Andrew Cameron"
+date: "2024-10-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+
+```
+
+```{r, message = FALSE}
+# Load the data
+data <- read_csv("data/processed_dataset.csv")
+trends <- read_csv("data/longTerm_Annual_Regression_Statistics_ALLSTATIONS.csv")
+# This file contains a column with the number of years of observations. 
+metadata <- read_csv("Data/updated_metadata.csv")
+
+```
+
+# Plot Creation
+
+Objective: Panelled plot with 3 variables per row; 6 vars total (Secchi, CHLa, TSS, Total Nitrogen, Total Phosphorus, DIN). 
+Each panel will have trend lines for all relevant stations. 
+Lines should be colored based on the significance of the slope (significant positive, significant negative, not significant). 
+
+Plotting mblm trend lines of this sort requires a data frame with the min and max years of observations for each station-variable combination to be able to define the x start and end points. Adjusted model slopes are also required, as model slopes are based on x=0 but our x ranges from 1970s to 20xx. 
+
+`adjusted_intercept = model_intercept + model_slope * min(Year)`
+
+
+### Deriving min and max years (x-axis limits for trend lines)
+
+```{r}
+# Named vector for mapping metadata_column to var_col for use in function
+metadata_to_varcol <- c(
+  "nYears_Secchi" = "SECCHI_DEPTH",
+  "nYears_CHLA" = "CHLa",
+  "nYears_totNitrogen" = "NITROGEN_TOTAL",
+  "nYears_totPhosphorus" = "PHOSPHORUS_TOTAL",
+  "nYears_TSS" = "TSS",
+  "nYears_DIN" = "DIN"
+)
+
+# Function to subset data based on a minimum years of observations threshold. All station-variables in `data` have already been filtered to include only those with min 3 measurements per year (May-Oct).
+subset_variable_data <- function(metadata_column, threshold = 10) {
+  stations <- metadata %>%
+    filter(!!sym(metadata_column) >= threshold) %>%
+    pull(STATION_ID)
+  
+  var_col <- metadata_to_varcol[metadata_column]
+    
+  return(data %>%
+           filter(STATION_ID %in% stations) %>%
+           filter(!is.na(!!sym(var_col)))  
+      )
+}
+
+# Create the subset_data list using the function
+subset_data <- list(
+  SECCHI_DEPTH = subset_variable_data("nYears_Secchi"),   
+  CHLa = subset_variable_data("nYears_CHLA"),           
+  NITROGEN_TOTAL = subset_variable_data("nYears_totNitrogen"), 
+  PHOSPHORUS_TOTAL = subset_variable_data("nYears_totPhosphorus"), 
+  TSS = subset_variable_data("nYears_TSS"),
+  DIN = subset_variable_data("nYears_DIN")
+)
+
+```
+
+
+```{r}
+YearLims <- list()
+vars <- c("SECCHI_DEPTH", "CHLa", "NITROGEN_TOTAL", "PHOSPHORUS_TOTAL", "TSS", "DIN")
+
+for (var in vars) {
+  # Get the yearly averages by station for the current variable
+  df <- subset_data[[var]]
+  # Vector with unique stations for this variable
+  the_stations <- unique(df$STATION_ID)
+  
+  # Initialize the data frame for storing minimum years
+  minmax.df <- data.frame(STATION_ID = the_stations,
+                           variable = var,
+                           minYear = rep(NA, length(the_stations)),
+                           maxYear = rep(NA, length(the_stations)))
+  
+  # Loop through the stations and pull the min & max year
+  for (i in seq_along(the_stations)) {
+    minmax.df$minYear[i] <- df %>% 
+      filter(STATION_ID == the_stations[i]) %>%
+      summarise(minYear = min(Year)) %>%
+      pull(minYear)
+    
+    minmax.df$maxYear[i] <- df %>%
+      filter(STATION_ID == the_stations[i]) %>%
+      summarise(maxYear = max(Year)) %>%
+      pull(maxYear)
+  }
+  
+  # Store the data frame for this variable
+  YearLims[[var]] <- minmax.df
+}
+
+
+yearLims.df <- bind_rows(YearLims)
+
+```
+
+
+
+```{r}
+regressions_adjusted <- trends %>%
+  left_join(yearLims.df, by = c("STATION_ID", "variable")) %>%
+  mutate(adjusted_intercept = model_intercept + model_slope * minYear)
+
+```
+
+# Data Viz: mblm slopes for all stations, by variable
+
+```{r}
+# This code block is for setting up the data for plotting. It adds a field for significance and one with units using unicode characters.
+plot_df <- regressions_adjusted %>%
+  mutate(significant = if_else(model_pval <= .05 & model_slope > 0, "significant positive", 
+                               if_else(model_pval <= .05 & model_slope < 0, "significant negative", "not significant"))
+         ) %>%
+  mutate(var_units = case_when(
+    variable == "SECCHI_DEPTH" ~ "Secchi Depth (m)",  # meters
+    variable == "CHLa" ~ "Chlorophyll-a (\u03BCg L\u207B\u00B9)",  # micrograms per liter
+    variable == "TSS" ~ "TSS (mg L\u207B\u00B9)",  # milligrams per liter
+    variable == "NITROGEN_TOTAL" ~ "Total N (mg N L\u207B\u00B9)",  # milligrams of nitrogen per liter
+    variable == "PHOSPHORUS_TOTAL" ~ "Total P (mg P L\u207B\u00B9)",  # milligrams of phosphorus per liter
+    variable == "DIN" ~ "DIN (mg N L\u207B\u00B9)"  # milligrams of nitrogen per liter
+  ))
+
+# set significant as factor to ensure sig lines sit on top of insignificant lines
+plot_df$significant <- factor(plot_df$significant, levels = c("significant positive", "significant negative", "not significant"))
+
+
+```
+
+
+The approach used to plot (i.e., facet grid) in the previous publication will not work effectively here. In that instance we were facetting based on two variables: temp/do and then surface/bottom/mean/range. The x axis was the same for all plots, and the y axis was the same on each row. Here we have 6 varaibles each with different units, scales, and year ranges. My approach is to create 6 separate plots and then patch them together.
+
+```{r fig.width=7, fig.height=7}
+library(ggplot2)
+library(patchwork)  
+
+# Plot 1: Secchi Depth
+p1 <- ggplot(subset(plot_df, variable == "SECCHI_DEPTH")) +
+  geom_segment(aes(x = minYear, xend = maxYear, 
+                   y = adjusted_intercept, 
+                   yend = adjusted_intercept + model_slope * (maxYear - minYear), 
+                   color = significant), size = .24) +
+  scale_color_manual(values = c("not significant" = "grey72", 
+                                "significant positive" = "#C9A818", 
+                                "significant negative" = "#124E78")) +
+  theme_minimal() + 
+  labs(x = NULL, y = "Secchi Depth (m)") +  # Custom y-axis label
+  theme(legend.position = "none",
+        panel.border = element_rect(colour = "black", fill=NA, size=.5),
+        axis.title.y = element_text(size = 10.2), 
+        axis.text.y = element_text(size = 8.5,  margin = margin(t = 0, r = 3, b = 0, l = 0)), 
+        axis.text.x = element_text(size = 8.5, angle = 45, hjust = .95),
+        legend.text = element_text(size = 8),  
+        legend.title = element_blank(),
+        strip.text = element_text(size = 11),
+        strip.placement = "outside",
+        panel.grid = element_line(color = "grey90", linewidth = .1),
+        aspect.ratio = 1.8)
+
+# Plot 2: Chlorophyll-a
+#!---- This plot controls the LEGEND ----!#
+p2 <- ggplot(subset(plot_df, variable == "CHLa")) +
+  geom_segment(aes(x = minYear, xend = maxYear, 
+                   y = adjusted_intercept, 
+                   yend = adjusted_intercept + model_slope * (maxYear - minYear), 
+                   color = significant), size = .24) +
+  scale_color_manual(values = c("not significant" = "grey72", 
+                                "significant positive" = "#C9A818", 
+                                "significant negative" = "#124E78")) +
+  theme_minimal() + 
+  labs(x = NULL, y = "Chlorophyll-a (µg L\u207B\u00B9)") +  
+  theme(legend.position = "top",
+        legend.key.height = unit(1, "cm"),
+        panel.border = element_rect(colour = "black", fill=NA, size=.5),
+        axis.title.y = element_text(size = 10.2), 
+        axis.text.y = element_text(size = 8.5,  margin = margin(t = 0, r = 3, b = 0, l = 0)), 
+        axis.text.x = element_text(size = 8.5, angle = 45, hjust = .95),
+        legend.text = element_text(size = 8),  
+        legend.title = element_blank(),
+        strip.text = element_text(size = 11),
+        strip.placement = "outside",
+        panel.grid = element_line(color = "grey90", linewidth = .1),
+        aspect.ratio = 1.8) +
+  guides(color = guide_legend(override.aes = list(linewidth = 1.25, alpha = .9))) #adjust the width of the legend lines
+
+# Plot 3: Total Suspended Solids (TSS)
+p3 <- ggplot(subset(plot_df, variable == "TSS")) +
+  geom_segment(aes(x = minYear, xend = maxYear, 
+                   y = adjusted_intercept, 
+                   yend = adjusted_intercept + model_slope * (maxYear - minYear), 
+                   color = significant), size = .24) +
+  scale_color_manual(values = c("not significant" = "grey72", 
+                                "significant positive" = "#C9A818", 
+                                "significant negative" = "#124E78")) +
+  theme_minimal() + 
+  labs(x = NULL, y = "TSS (mg L\u207B\u00B9)") +  
+  theme(legend.position = "none",
+        panel.border = element_rect(colour = "black", fill=NA, size=.5),
+        axis.title.y = element_text(size = 10.2), 
+        axis.text.y = element_text(size = 8.5,  margin = margin(t = 0, r = 3, b = 0, l = 0)), 
+        axis.text.x = element_text(size = 8.5, angle = 45, hjust = .95),
+        legend.text = element_text(size = 8),  
+        legend.title = element_blank(),
+        strip.text = element_text(size = 11),
+        strip.placement = "outside",
+        panel.grid = element_line(color = "grey90", linewidth = .1),
+        aspect.ratio = 1.8)
+
+# Plot 4: Total Nitrogen
+p4 <- ggplot(subset(plot_df, variable == "NITROGEN_TOTAL")) +
+  geom_segment(aes(x = minYear, xend = maxYear, 
+                   y = adjusted_intercept, 
+                   yend = adjusted_intercept + model_slope * (maxYear - minYear), 
+                   color = significant), size = .24) +
+  scale_color_manual(values = c("not significant" = "grey72", 
+                                "significant positive" = "#C9A818", 
+                                "significant negative" = "#124E78")) +
+  theme_minimal() + 
+  labs(x = NULL, y = "Total N (mg N L\u207B\u00B9)") +  
+  theme(legend.position = "none",
+        panel.border = element_rect(colour = "black", fill=NA, size=.5),
+        axis.title.y = element_text(size = 10.2), 
+        axis.text.y = element_text(size = 8.5,  margin = margin(t = 0, r = 3, b = 0, l = 0)), 
+        axis.text.x = element_text(size = 8.5, angle = 45, hjust = .95),
+        legend.text = element_text(size = 8),  
+        legend.title = element_blank(),
+        strip.text = element_text(size = 11),
+        strip.placement = "outside",
+        panel.grid = element_line(color = "grey90", linewidth = .1),
+        aspect.ratio = 1.8)
+
+# Plot 5: Total Phosphorus
+#! ---- This plot controls the X-AXIS LABEL (YEAR) ----!#
+p5 <- ggplot(subset(plot_df, variable == "PHOSPHORUS_TOTAL")) +
+  geom_segment(aes(x = minYear, xend = maxYear, 
+                   y = adjusted_intercept, 
+                   yend = adjusted_intercept + model_slope * (maxYear - minYear), 
+                   color = significant), size = .24) +
+  scale_color_manual(values = c("not significant" = "grey72", 
+                                "significant positive" = "#C9A818", 
+                                "significant negative" = "#124E78")) +
+  theme_minimal() + 
+  labs(x = "Year", y = "Total P (mg P L\u207B\u00B9)") +  
+  theme(legend.position = "none",
+        panel.border = element_rect(colour = "black", fill=NA, size=.5),
+        axis.title.x = element_text(size = 11.3), 
+        axis.title.y = element_text(size = 10.2),
+        axis.text.y = element_text(size = 8.5,  margin = margin(t = 0, r = 3, b = 0, l = 0)), 
+        axis.text.x = element_text(size = 8.5, angle = 45, hjust = .95),
+        legend.text = element_text(size = 8),  
+        legend.title = element_blank(),
+        strip.text = element_text(size = 11),
+        strip.placement = "outside",
+        panel.grid = element_line(color = "grey90", linewidth = .1),
+        aspect.ratio = 1.8)
+
+
+# Plot 6: Dissolved Inorganic Nitrogen (DIN)
+p6 <- ggplot(subset(plot_df, variable == "DIN")) +
+  geom_segment(aes(x = minYear, xend = maxYear, 
+                   y = adjusted_intercept, 
+                   yend = adjusted_intercept + model_slope * (maxYear - minYear), 
+                   color = significant), size = .24) +
+  scale_color_manual(values = c("not significant" = "grey72", 
+                                "significant positive" = "#C9A818", 
+                                "significant negative" = "#124E78")) +
+  theme_minimal() + 
+  labs(x = NULL, y = "DIN (mg N L\u207B\u00B9)") +  # Custom y-axis label
+  theme(legend.position = "none",
+        panel.border = element_rect(colour = "black", fill=NA, size=.5),
+        axis.title.y = element_text(size = 10.2), 
+        axis.text.y = element_text(size = 8.5,  margin = margin(t = 0, r = 3, b = 0, l = 0)), 
+        axis.text.x = element_text(size = 8.5, angle = 45, hjust = .95),
+        legend.text = element_text(size = 8),  
+        legend.title = element_blank(),
+        strip.text = element_text(size = 11),
+        strip.placement = "outside",
+        panel.grid = element_line(color = "grey90", linewidth = .1),
+        aspect.ratio = 1.8)
+
+```
+
+```{r fig.width=7, fig.height=7}
+# Combine the six individual plots using patchwork
+combined_plot <- (p1 | p2 | p3) /
+                 (p4 | p5 | p6) 
+
+# Display the combined plot
+combined_plot
+
+ggsave("publication_plot.jpg", width = 7, height = 7, units = "in", dpi = 1000)
+
+````
+

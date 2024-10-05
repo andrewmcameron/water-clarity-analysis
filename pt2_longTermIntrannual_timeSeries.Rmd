@@ -120,7 +120,10 @@ for (station in secchi_stations1) {
 }
 
 # Combine to make single list of all monthly averages
-monthlyAvgs_complete <- c(stationAvgs_10yrs, secchiOnly_avgs)
+yearlyAvgs_complete <- c(stationAvgs_10yrs, secchiOnly_avgs)
+## List structure:
+## list[[station]]$variable  variable = df with Year, STATION_ID, MAY_OCT_AVG
+
 
 ```
 
@@ -135,7 +138,7 @@ trends_func <- function(station, variable) {
   
   modelSummary <- list()  
   
-  df <- monthlyAvgs_complete[[station]][[variable]]
+  df <- yearlyAvgs_complete[[station]][[variable]]
   
   # Remove NA values -- there should not be any, but just in case.
   df <- df %>%
@@ -158,14 +161,15 @@ trends_func <- function(station, variable) {
 }
 
 # ------- Run custom function in for loop -------
-# Loop through each variable and run the function. This generates a heavily nested list structure trends_results -> list for each variable -> each variable has lists for each station_month -> each station_month list contains 1 list with 4 elements (the model results)
+# trends_results (outer list); contains -> list for each variable; contains -> lists for each station; which each contain -> 1 list with 4 elements (the model results)
+## list[[station]]$variable  variable = list with slope, MAD, pval, intercept
 
-# Trends for all stations/variables with 10+ yr and 3+ obs/yr
+# Trends for stations of interest/variables with 10+ yr and 3+ obs/yr
 trends_results <- list()
 
 for (station in unique(all33_stations)) {
   for (variable in vars) {
-    if (variable %in% names(monthlyAvgs_complete[[station]])) {
+    if (variable %in% names(yearlyAvgs_complete[[station]])) {
   trends_results[[station]][[variable]] <- trends_func(station, variable)
     }
   }
@@ -184,13 +188,13 @@ for (station in unique(all33_stations)) {
   modelSums <- trends_results[[station]]
   
       reg.df <- data.frame(STATION_ID = station,
-                           variable = vars[vars %in% names(monthlyAvgs_complete[[station]])],
-               model_slope = rep(NA, length(monthlyAvgs_complete[[station]])),
-               model_MAD = rep(NA, length(monthlyAvgs_complete[[station]])),
-               model_pval = rep(NA, length(monthlyAvgs_complete[[station]])),
-               model_intercept = rep(NA, length(monthlyAvgs_complete[[station]])))
+                           variable = vars[vars %in% names(yearlyAvgs_complete[[station]])],
+               model_slope = rep(NA, length(yearlyAvgs_complete[[station]])),
+               model_MAD = rep(NA, length(yearlyAvgs_complete[[station]])),
+               model_pval = rep(NA, length(yearlyAvgs_complete[[station]])),
+               model_intercept = rep(NA, length(yearlyAvgs_complete[[station]])))
       
-  for (i in seq_along(monthlyAvgs_complete[[station]])) {
+  for (i in seq_along(yearlyAvgs_complete[[station]])) {
       
         p <- modelSums[[i]]
       
@@ -205,7 +209,7 @@ for (station in unique(all33_stations)) {
   
 
 # ------- Create data frames from lists -------
-regressions_df <- bind_rows(regression_statistics) # 28 stations with >= 10 yrs data
+regressions_df <- bind_rows(regression_statistics) 
 
 write_csv(regressions_df, "data/longTerm_Annual_Regression_Statistics.csv")
 
@@ -232,7 +236,7 @@ minYear <- list()
 
 for (station in unique(all33_stations)) {
   # Filter variables that exist in the current station
-  station_vars <- vars[vars %in% names(monthlyAvgs_complete[[station]])]
+  station_vars <- vars[vars %in% names(yearlyAvgs_complete[[station]])]
   
   # Initialize the data frame for storing minimum years
   minYear.df <- data.frame(STATION_ID = station,
@@ -242,7 +246,7 @@ for (station in unique(all33_stations)) {
   # Loop through the variables and calculate the minimum year
   for (i in seq_along(station_vars)) {
     var <- station_vars[i]
-    minYear.df$minYear[i] <- min(monthlyAvgs_complete[[station]][[var]]$Year, na.rm = TRUE)
+    minYear.df$minYear[i] <- min(yearlyAvgs_complete[[station]][[var]]$Year, na.rm = TRUE)
   }
   
   # Store the data frame for this station
@@ -268,22 +272,22 @@ regressions_adjusted <- regressions_df %>%
 library(ggplot2)
 # use regressions_adjusted along with the monthly averages list
 # monthly avg list structure: list[[station]]$variable  variable = df with Year, STATION_ID, MAY_OCT_AVG
-
+# recall that, due to thow the output of the `mblm` function is structured, it cannot be passed to geom_smooth as a smoothing function. This results in having to 'manually' draw the trend lines.
 # List to hold all plots 
 all_plots_list <- list()
 
-for (station in names(monthlyAvgs_complete)) {
+for (station in names(yearlyAvgs_complete)) {
   # Initiate list to store plots for this station
   station_plots <- list()
   
-  for (current_var in names(monthlyAvgs_complete[[station]])) {
-    df_avgs <- monthlyAvgs_complete[[station]][[current_var]]
+  for (current_var in names(yearlyAvgs_complete[[station]])) {
+    df_avgs <- yearlyAvgs_complete[[station]][[current_var]]
     df_reg <- regressions_adjusted %>%
       filter(variable == current_var, STATION_ID == station)
     
     var_plot <- ggplot(df_avgs, aes(x = Year, y = MAY_OCT_AVG)) +
       geom_point() +
-        # Use annotate() instead of aes() inside geom_segment for the trend line. ggplot expects each aesthetic  to be mapped to a column in the data, and geom_segment() - which I originally used - was receiving values (x, xend, y, and yend) that had only a single length, while the data (df_avgs) has multiple rows.  Using `annotate` eliminates the warning because it explicitly adds a line based on single values (rather than having ggplot2 try to match them to rows in df_avgs)
+        # Use annotate() instead of geom_segment() for the trend line. ggplot expects each aesthetic  to be mapped to a column in the data, and geom_segment() - which I originally used - was receiving values (x, xend, y, and yend) that had only a single length (min and max). Also, aes() is designed to map aesthetics to a SINGLE dataframe, whereas this plot requires reference to two dfs to produce the trend lines.Using `annotate` eliminates the warning because it explicitly adds a line based on single values (rather than having ggplot2 try to match them to rows in df_avgs)
       annotate("segment", x = min(df_avgs$Year), 
                xend = max(df_avgs$Year), 
                y = df_reg$adjusted_intercept, 
@@ -307,6 +311,144 @@ for (station in names(monthlyAvgs_complete)) {
 
 
 save(all_plots_list, file = "all_plots_list.RData")
+
+```
+
+
+# Regressions for All Stations-Variables
+
+After completing the above workflow, Paul requested that I generate a file with regression statistics for all stations-variables with at least 10 years of data based on May-Oct averages. In effect, do what was done above, but include all stations as opposed to the 33 stations of interest.
+
+```{r}
+# This file contains a column with the number of years of observations. 
+metadata <- read_csv("Data/updated_metadata.csv")
+
+```
+
+```{r}
+# Function to subset data based on a minimum years of observations threshold. All station-variables in `data` have already been filtered to include only those with min 3 measurements per year (May-Oct).
+subset_variable_data <- function(metadata_column, threshold = 10) {
+  stations <- metadata %>%
+    filter(!!sym(metadata_column) >= threshold) %>%
+    pull(STATION_ID)
+  
+  return(data %>%
+    filter(STATION_ID %in% stations))
+}
+
+# Create the subset_data list using the function
+subset_data <- list(
+  SECCHI_DEPTH = subset_variable_data("nYears_Secchi"),   
+  CHLa = subset_variable_data("nYears_CHLA"),           
+  NITROGEN_TOTAL = subset_variable_data("nYears_totNitrogen"), 
+  PHOSPHORUS_TOTAL = subset_variable_data("nYears_totPhosphorus"), 
+  TSS = subset_variable_data("nYears_TSS"),
+  DIN = subset_variable_data("nYears_DIN")
+)
+
+# Derive May-Oct Means for each year by station-variable
+stationAvgs <- list()
+
+for (var in names(subset_data)) {
+  df <- subset_data[[var]]
+  
+  # Group by Year and STATION_ID, and calculate the May-Oct average for the variable
+  sy_avgs <- df %>%
+    group_by(Year, STATION_ID) %>%
+    summarise(MAY_OCT_AVG = mean(!!sym(var), na.rm = TRUE))
+  
+  stationAvgs[[var]] <- sy_avgs
+}
+
+```
+
+## Run MBLM for each station and variable
+
+Each station is stored as a list in `stationAvgs`. This list has a different structure from the one used above. Here, the list contains 6 dataframes, one for each variable. 
+
+#### Custom function to derive trends
+
+```{r, warning = FALSE}
+trends_func <- function(variable) {
+  
+  modelSummaries <- list()  
+  
+  df <- stationAvgs[[variable]]
+  
+  for (station in unique(df$STATION_ID)) {
+    # Filter for current station
+    df_station <- df %>%
+      filter(STATION_ID == station) %>%
+      filter(!is.na(MAY_OCT_AVG)) %>%
+      ungroup()
+    
+    # Run mblm model
+    model <- mblm::mblm(MAY_OCT_AVG ~ Year, data = df_station)
+    mod.sum <- mblm::summary.mblm(model)
+    
+    # Store results (directly, without creating the combined station-variable name)
+    modelSummary <- list(
+      station = station,
+      slope = mod.sum$coefficients[2, 1],
+      MAD = mod.sum$coefficients["Year", "MAD"],
+      pvalue = mod.sum$coefficients["Year", 4],
+      intercept = mod.sum$coefficients[1, 1]
+    )
+    
+    modelSummaries[[station]] <- modelSummary
+  }
+  
+  return(modelSummaries)  # Return the results
+}
+
+# ------- Run custom function in for loop -------
+
+# Trends for all stations/variables with 10+ yr and 3+ obs/yr
+trends_results <- list()
+
+  for (variable in vars) {
+  trends_results[[variable]] <- trends_func(variable)
+  }
+
+
+```
+
+
+#### Extract Regression Statistics into single table
+
+```{r `regression stats`}
+regStats_allStations<- list()
+
+for (variable in names(trends_results)) {
+      
+  modelSums <- trends_results[[variable]]
+  
+      reg.df <- data.frame(STATION_ID = names(modelSums),
+                           variable = variable,
+               model_slope = rep(NA, length(names(modelSums))),
+               model_MAD = rep(NA, length(names(modelSums))),
+               model_pval = rep(NA, length(names(modelSums))),
+               model_intercept = rep(NA, length(names(modelSums))))
+      
+  for (i in seq_along(names(modelSums))) {
+      
+        p <- modelSums[[i]]
+      
+        reg.df$model_slope[i] <-  p$slope
+        reg.df$model_MAD[i] <-  p$MAD
+        reg.df$model_pval[i] <-  p$pvalue
+        reg.df$model_intercept[i] <-  p$intercept
+      }
+      
+      regStats_allStations[[variable]] <- reg.df
+}
+  
+
+# ------- Create data frames from lists -------
+regStats_allStations_df <- bind_rows(regStats_allStations) %>%
+  arrange(STATION_ID)
+
+write_csv(regStats_allStations_df, "data/longTerm_Annual_Regression_Statistics_ALLSTATIONS.csv")
 
 ```
 

@@ -15,7 +15,7 @@ source("C:/Users/andre/my_functions.R")
 
 ```{r}
 # Load the data
-data <- openxlsx::read.xlsx("data/VADEQ_reservoir_secchi_data_original.xlsx", sheet = 2)
+data <- openxlsx::read.xlsx("data/VADEQ_reservoir_data_original.xlsx", sheet = 2)
 
 ```
 
@@ -114,17 +114,74 @@ secchi_df <- data %>%
       TURBIDITY_HACH = `TURBIDITY,HACH TURBIDIMETER (FORMAZIN TURB UNIT)`,
       TURBIDITY_NTU = `TURBIDITY,LAB NEPHELOMETRIC TURBIDITY UNITS, NTU`
     )
-  
 
+```
+
+### Incorporate Lake Anna Supplemental Data
+
+"The task is to merge the two datasets, re-run the Station MetaData analysis for the merged dataset so we can see which stations gained years, and then re-run the trend analysis to see how the trend estimates were affected by having the additional data.  Note that for the trend analysis we are still using May-Oct averages, but with the combined DEQ-LACA dataset, we might have 2 observations in the same month, which is OK (you do not need to average by month first, just use the average of all observations).  Let's stick with the min of 3 observations in a year, but for the merged dataset, the min may not be 3 different months (i.e., we would include a year that might have 2 observations in July and 1 in August)."
+
+
+```{r}
+LAsupp.df <- openxlsx::read.xlsx("data/Lake Anna Suppl.xlsx", sheet = 2)
+
+# Rename columns to match the DEQ data
+LAsupp.df <- LAsupp.df %>%
+  rename(
+    DATE = "Sample.Date",
+    STATION_ID = "DEQ.Site.#",
+    CHLa = "CHLA.(ug/L)",
+    SECCHI_DEPTH = "SECCHI.DEPTH.(m)",
+    NITROGEN_TOTAL = "TOTNIT.(mg/L)",
+    PHOSPHORUS_TOTAL = "TOTPHOS.(mg/L)"
+  ) 
+
+# Render date as date object with custom function
+LAsupp.df$DATE <- convertExcelDateTime(LAsupp.df, "DATE")
+
+# Create StationDate, StationYear, Year, and Month fields
+LAsupp.df <- LAsupp.df %>%
+  mutate(
+    StationDate = paste(STATION_ID, DATE, sep = "_"),
+    Year = year(DATE),
+    Month = month(DATE)
+  ) %>%
+  filter(month(DATE) >= 5 & month(DATE) <= 10) %>%  # filter for months May through October
+  select(-Rainfall, -LOCATION.NAME)
+
+# Remove duplicate station-dates by taking the mean of the relevant variables
+LAsupp.df <- LAsupp.df %>%
+  group_by(StationDate) %>%
+  summarize(across(c(STATION_ID, DATE, Year, Month), first),
+            across(c(CHLa, SECCHI_DEPTH, NITROGEN_TOTAL, PHOSPHORUS_TOTAL), ~ mean(.x, na.rm = TRUE))) 
+
+
+# Identify missing columns in LAsupp.df and add them with NA values
+missing_columns <- setdiff(names(joined_df), names(LAsupp.df))
+
+LAsupp.df[missing_columns] <- NA  # Add missing columns and fill with NA
+
+combined_data <- bind_rows(joined_df, LAsupp.df)
+
+# Combining produced a small number of duplicate station-date entries. Remove these.
+combined_data <- combined_data %>%
+  group_by(StationDate) %>%
+  summarize(across(c(STATION_ID, DATE, Year, Month), first),
+            across(c(CHLa, SECCHI_DEPTH, NITROGEN_TOTAL, PHOSPHORUS_TOTAL, PHOSPHORUS_ORTHO, TURBIDITY_HACH, TURBIDITY_NTU), ~ mean(.x, na.rm = TRUE)))
+
+```
+
+
+```{r}
 # --------- Remove site years that do not have a minimum of 3 measurements in May-Oct ------------
   ## Create station-year field
-  stationyears <- joined_df %>%
+  stationyears <- combined_data %>%
     mutate(STATION_YEAR = paste(STATION_ID, Year, sep = "_"))
 
   ## How many unique station-years currently?
-  length(unique(stationyears$STATION_YEAR)) # 3662 unique site years
+  length(unique(stationyears$STATION_YEAR)) # 3750 unique site years
   
-  ## How many unique station-years have at least 3 measurements for each variable?
+  ## Which station-years have at least 3 measurements for each variable?
   x <- stationyears %>%
      group_by(STATION_YEAR) %>%
       summarise(
@@ -178,9 +235,9 @@ names(analysis.dfs) <- names(variables)
 
 ### DEQ Solids Data
 
-After initital wrangling, summarizing, and overall assessment of available data, Paul found another DEQ dataset that contains alternative metrics for estimating suspended solids (TF & TSF). This is valuable because of the dirth of available TSS data in the original data set.
+After initital wrangling, summarizing, and overall assessment of available data, Paul found another DEQ dataset that contains alternative metrics for estimating suspended solids (TF & TSF). This is valuable because of the dearth of available TSS data in the original data set.
 
-Solids data set has more or less the same sort of structure as the original data set. After wrangling it must be incorporated into the main data set.
+Solids data set has more or less the same sort of structure as the original data set (i.e., variables in both row and column format). After wrangling it must be incorporated into the main data set.
 
 
 ```{r}
@@ -404,10 +461,11 @@ nrow(unique(df[, c("DATE", "STATION_ID")])) == nrow(wide_df)  # Pivoting has suc
 
 ```
 
-
 ### Single data set for all wrangled variables
 
 Each variable of interest is in its own data frame within the `analysis.dfs` list. Each df has the same schema, with only the variable column differing. This chunk simply joins all of those data frames into a single data frame. 
+
+The incorporation of Lake Anna supplemental data added 276 total rows (station-dates) to the data set (455 station-dates in supplemental data after filtering out non May-Oct rows -- 179 of these were already in the DEQ data set).
 
 ```{r}
 #  Join on all except the variable column. This avoids duplicate cols
@@ -420,12 +478,14 @@ write_csv(my_data, "data/processed_dataset.csv")
 
 ```
 
-# Extract Metadata for Stations
-
-Data must be further subset to include only lake stations that have a minimum of 15 observations. 
+Data must be further subset to include only lake stations that have a minimum of 15 years of observations. 
 The result will be a separate subset of lake stations for each variable.
+Using the joined df could *potentially* introduce station-years with <3 Nobs.
+In that case, subsetting should be done on the individual, variable-specific data frames in the `analysis.dfs` list. 
 
-This subsetting should maybe be done on the individual, variable-specific data frames. Using the joined df could *potentially* introduce station-years with <3 Nobs.
+The final processed data will have lots of NA values across variables, but this is expected because there is only one row per station-date (not every variable was measured at every station-date). The important thing is that no station-dates for any variables are included in the processed data that result in there being a year for a given variable in which there are fewer than 3 (i.e., 1 or 2) observations only during May-Oct. 
+
+The code chunk below confirms that, in fact, after joining all data frames, no variables at the station-year level have fewer than 3 observations.
 
 ```{r}
   x <- my_data %>%
@@ -445,12 +505,14 @@ This subsetting should maybe be done on the individual, variable-specific data f
         N_NITRATE = sum(!is.na(NITRATE_TOTAL)),
       )
 
+
 any(x == 1)
 any(x == 2)
 
-# Not the case...joining the dfs did not create a situation in which a variable had only 1 or 2 Nobs per station-year.
-
 ```
+
+
+# Extract Metadata for Stations
 
 ```{r}
 # ----------- Extract metadata for stations ------------
@@ -501,16 +563,66 @@ metadata <- my_data %>%
   )
 
 
-write_csv(metadata, "data/station_metadata.csv")
-            
+write_csv(metadata, "data/updated_metadata.csv")
+
+
+# ---- Compare Metadata before and after adding Lake Anna supplemental data ----
+## How many stations now have 10+ yrs for each variable after adding Lake Anna supplemental data?
+orig_meta <- read_csv("data/initital_metadata.csv")
+vars_of_interest <- c("nYears_Secchi", "nYears_CHLA", "nYears_totNitrogen", "nYears_totPhosphorus")
+
+# Summarise the original metadata
+orig_summary <- orig_meta %>%
+  summarise(
+    n_stations = n(),
+    across(vars_of_interest, ~ sum(. >= 10))
+  )
+
+# Summarise the updated metadata
+updated_summary <- metadata %>%
+  summarise(
+    n_stations = n(),
+    across(vars_of_interest, ~ sum(. >= 10))
+  )
+
+difference <- updated_summary - orig_summary
+
+difference  # for each variable, there are 4 additional stations with 10+ years of data
+
+## Which stations now have 10+ that previously did not?
+# Step 1: Identify stations with 10+ years for each variable in the original metadata
+orig_10plus <- orig_meta %>%
+  filter(nYears_Secchi >= 10 | nYears_CHLA >= 10 | nYears_totNitrogen >= 10 | nYears_totPhosphorus >= 10) %>%
+  select(STATION_ID)
+
+# Step 2: Identify stations with 10+ years for each variable in the updated metadata
+updated_10plus <- metadata %>%
+  filter(nYears_Secchi >= 10 | nYears_CHLA >= 10 | nYears_totNitrogen >= 10 | nYears_totPhosphorus >= 10) %>%
+  select(STATION_ID)
+
+# Step 3: Find new stations with 10+ years by checking which STATION_IDs are in the updated metadata but not in the original metadata
+new_10plus_stations <- updated_10plus %>%
+  anti_join(orig_10plus, by = "STATION_ID")
+
+
+print(new_10plus_stations) # 4 new stations in total
+
+new_10plus_stations$STATION_ID -> f
+
+f %in% unique(data$STATION_ID)
+f %in% unique(solids_data$STATION_ID)
+f %in% unique(N_data$STATION_ID)
+f %in% unique(tss_data$STATION_ID)
+
+
 ```
 
 # Create Data Subsets by Variable
 
-Subset data by variable where Nobs >= 15 for that variable
+Subset data by variable where Nobs(years) >= some threhsold for that variable.
 
 ```{r}
-subset_variable_data <- function(variable_name, metadata_column, threshold = 15) {
+subset_variable_data <- function(metadata_column, threshold = 10) {
   stations <- metadata %>%
     filter(!!sym(metadata_column) >= threshold) %>%
     pull(STATION_ID)
@@ -521,16 +633,16 @@ subset_variable_data <- function(variable_name, metadata_column, threshold = 15)
 
 # Create the subset_data list using the function
 subset_data <- list(
-  SECCHI_DEPTH = subset_variable_data("secchi", "nYears_Secchi"),   
-  CHLa = subset_variable_data("chla", "nYears_CHLA"),           
-  NITROGEN_TOTAL = subset_variable_data("nitrogen", "nYears_totNitrogen"), 
-  PHOSPHORUS_TOTAL = subset_variable_data("phosphorus", "nYears_totPhosphorus"), 
-  TSF = subset_variable_data("TSF", "nYears_TSF"), 
-  TF = subset_variable_data("TF", "nYears_TF"),
-  TSS = subset_variable_data("TSS", "nYears_TSS"),
-  AMMONIA_TOTAL = subset_variable_data("ammonia", "nYears_AMMONIA"),
-  NITRATE_TOTAL = subset_variable_data("nitrate", "nYears_NITRATE"),
-  DIN = subset_variable_data("DIN", "nYears_DIN")
+  SECCHI_DEPTH = subset_variable_data("nYears_Secchi"),   
+  CHLa = subset_variable_data("nYears_CHLA"),           
+  NITROGEN_TOTAL = subset_variable_data("nYears_totNitrogen"), 
+  PHOSPHORUS_TOTAL = subset_variable_data("nYears_totPhosphorus"), 
+  TSF = subset_variable_data("nYears_TSF"), 
+  TF = subset_variable_data("nYears_TF"),
+  TSS = subset_variable_data("nYears_TSS"),
+  AMMONIA_TOTAL = subset_variable_data("nYears_AMMONIA"),
+  NITRATE_TOTAL = subset_variable_data("nYears_NITRATE"),
+  DIN = subset_variable_data("nYears_DIN")
 )
 
 ```
@@ -575,14 +687,6 @@ bind_rows(Monthly_Summary_Statistics, .id = "Variable") %>%
 
 # Trends at the Station Level
 
-From Paul
-
-"The good news is that we have a high degree of coherence for monitoring of Secchi, TN, TP and CHLa as all have similar start years, mean years and number of stations to be included in the station-specific and population-level trend analysis.
-
-But it is disappointing to see that there are so few stations that have adequate TSS or turbidity data.  This limits us to asking the question whether Secchi is changing over time, and if so, is this due to changes in CHLa.  But of the 3 parameters that most influence water clarity (CDOM, TSS and CHLa), we are missing the two most important.
-
-Please go ahead and run the station-specific analysis for Secchi, TN, TP and CHLa.  Note that for all 4 of these we are working only with the summer (May-Oct) average values for each year."
-
 #### Custom function to derive trends
 
 ```{r}
@@ -620,7 +724,7 @@ trends_func <- function(variable) {
             )
         }, error = function(e) {
           # Handle the error, in this case generate message that points to problematic station and month
-          message(paste("Error for station:", station_id, "month:", month_num, ":", e$message))
+          message(paste("Error for", variable, "on", station:, station_id, "month:", month_num,":", e$message))
         })
       }
     }
@@ -638,7 +742,8 @@ variables <- c("SECCHI_DEPTH", "CHLa", "NITROGEN_TOTAL", "PHOSPHORUS_TOTAL", "TS
 
 trends_results <- list()
 
-# Loop through each variable and run the function. This generates a heavily nested list structure trends_results -> list for each variable -> each variable has lists for each station_month -> each station_month list contains 1 list with 4 elements (the model results)
+# Loop through each variable and run the function. This generates a nested list structure:
+# trends_results (outer list); contains -> list for each variable; contains -> lists for each station_month; which each contain -> 1 list with 4 elements (the model results)
 for (variable in variables) {
   trends_results[[variable]] <- trends_func(variable)
 }
