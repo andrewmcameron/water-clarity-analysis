@@ -127,6 +127,7 @@ plot_df <- regressions_adjusted %>%
   mutate(significant = if_else(model_pval <= .05 & model_slope > 0, "significant positive", 
                                if_else(model_pval <= .05 & model_slope < 0, "significant negative", "not significant"))
          ) %>%
+  arrange(factor(significant, levels = c("not significant", "significant negative", "significant positive"))) %>% # set significant as factor, then arrange to ensure sig lines sit on top of insignificant lines
   mutate(var_units = case_when(
     variable == "SECCHI_DEPTH" ~ "Secchi Depth (m)",  # meters
     variable == "CHLa" ~ "Chlorophyll-a (\u03BCg L\u207B\u00B9)",  # micrograms per liter
@@ -136,9 +137,9 @@ plot_df <- regressions_adjusted %>%
     variable == "DIN" ~ "DIN (mg N L\u207B\u00B9)"  # milligrams of nitrogen per liter
   ))
 
-# set significant as factor to ensure sig lines sit on top of insignificant lines
-plot_df$significant <- factor(plot_df$significant, levels = c("significant positive", "significant negative", "not significant"))
-
+# Remove specific outlier stations
+plot_df <- plot_df %>%
+  filter(!STATION_ID %in% c("2-XDD000.40", "5ASRN000.66"))
 
 ```
 
@@ -221,8 +222,10 @@ p3 <- ggplot(subset(plot_df, variable == "TSS")) +
         panel.grid = element_line(color = "grey90", linewidth = .1),
         aspect.ratio = 1.8)
 
-# Plot 4: Total Nitrogen
-p4 <- ggplot(subset(plot_df, variable == "NITROGEN_TOTAL")) +
+
+# Plot 4: Total Phosphorus
+#! ---- This plot controls the X-AXIS LABEL (YEAR) ----!#
+p4 <- ggplot(subset(plot_df, variable == "PHOSPHORUS_TOTAL")) +
   geom_segment(aes(x = minYear, xend = maxYear, 
                    y = adjusted_intercept, 
                    yend = adjusted_intercept + model_slope * (maxYear - minYear), 
@@ -231,10 +234,11 @@ p4 <- ggplot(subset(plot_df, variable == "NITROGEN_TOTAL")) +
                                 "significant positive" = "#C9A818", 
                                 "significant negative" = "#124E78")) +
   theme_minimal() + 
-  labs(x = NULL, y = "Total N (mg N L\u207B\u00B9)") +  
+  labs(x = NULL, y = "Total P (mg P L\u207B\u00B9)") +  
   theme(legend.position = "none",
         panel.border = element_rect(colour = "black", fill=NA, size=.5),
-        axis.title.y = element_text(size = 10.2), 
+        axis.title.x = element_text(size = 11.3), 
+        axis.title.y = element_text(size = 10.2),
         axis.text.y = element_text(size = 8.5,  margin = margin(t = 0, r = 3, b = 0, l = 0)), 
         axis.text.x = element_text(size = 8.5, angle = 45, hjust = .95),
         legend.text = element_text(size = 8),  
@@ -244,9 +248,9 @@ p4 <- ggplot(subset(plot_df, variable == "NITROGEN_TOTAL")) +
         panel.grid = element_line(color = "grey90", linewidth = .1),
         aspect.ratio = 1.8)
 
-# Plot 5: Total Phosphorus
+# Plot 5: Total Nitrogen
 #! ---- This plot controls the X-AXIS LABEL (YEAR) ----!#
-p5 <- ggplot(subset(plot_df, variable == "PHOSPHORUS_TOTAL")) +
+p5 <- ggplot(subset(plot_df, variable == "NITROGEN_TOTAL")) +
   geom_segment(aes(x = minYear, xend = maxYear, 
                    y = adjusted_intercept, 
                    yend = adjusted_intercept + model_slope * (maxYear - minYear), 
@@ -254,12 +258,13 @@ p5 <- ggplot(subset(plot_df, variable == "PHOSPHORUS_TOTAL")) +
   scale_color_manual(values = c("not significant" = "grey72", 
                                 "significant positive" = "#C9A818", 
                                 "significant negative" = "#124E78")) +
+  scale_y_continuous(limits = c(0, 2.5), breaks = c(0, 1, 2)) +
+  scale_x_continuous(limits = c(1990, 2025), breaks = seq(1990, 2020, 10)) +
   theme_minimal() + 
-  labs(x = "Year", y = "Total P (mg P L\u207B\u00B9)") +  
+  labs(x = "Year", y = "Total N (mg N L\u207B\u00B9)") +  
   theme(legend.position = "none",
         panel.border = element_rect(colour = "black", fill=NA, size=.5),
-        axis.title.x = element_text(size = 11.3), 
-        axis.title.y = element_text(size = 10.2),
+        axis.title.y = element_text(size = 10.2), 
         axis.text.y = element_text(size = 8.5,  margin = margin(t = 0, r = 3, b = 0, l = 0)), 
         axis.text.x = element_text(size = 8.5, angle = 45, hjust = .95),
         legend.text = element_text(size = 8),  
@@ -279,6 +284,8 @@ p6 <- ggplot(subset(plot_df, variable == "DIN")) +
   scale_color_manual(values = c("not significant" = "grey72", 
                                 "significant positive" = "#C9A818", 
                                 "significant negative" = "#124E78")) +
+  scale_y_continuous(limits = c(0, 2.5), breaks = c(0, 1, 2)) +
+  scale_x_continuous(limits = c(1972, 2025), breaks = seq(1980, 2020, 10)) +
   theme_minimal() + 
   labs(x = NULL, y = "DIN (mg N L\u207B\u00B9)") +  # Custom y-axis label
   theme(legend.position = "none",
@@ -295,7 +302,7 @@ p6 <- ggplot(subset(plot_df, variable == "DIN")) +
 
 ```
 
-```{r fig.width=7, fig.height=7}
+```{r fig.width=7, fig.height=7, warning = FALSE}
 # Combine the six individual plots using patchwork
 combined_plot <- (p1 | p2 | p3) /
                  (p4 | p5 | p6) 
@@ -304,6 +311,8 @@ combined_plot <- (p1 | p2 | p3) /
 combined_plot
 
 ggsave("publication_plot.jpg", width = 7, height = 7, units = "in", dpi = 1000)
+
+
 
 ````
 

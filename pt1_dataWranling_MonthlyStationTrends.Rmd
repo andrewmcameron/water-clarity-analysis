@@ -114,6 +114,9 @@ secchi_df <- data %>%
       TURBIDITY_HACH = `TURBIDITY,HACH TURBIDIMETER (FORMAZIN TURB UNIT)`,
       TURBIDITY_NTU = `TURBIDITY,LAB NEPHELOMETRIC TURBIDITY UNITS, NTU`
     )
+  
+  joined_df %>%
+    select(Year, STATION_ID, StationDate, NITROGEN_TOTAL) -> tn
 
 ```
 
@@ -168,6 +171,12 @@ combined_data <- combined_data %>%
   group_by(StationDate) %>%
   summarize(across(c(STATION_ID, DATE, Year, Month), first),
             across(c(CHLa, SECCHI_DEPTH, NITROGEN_TOTAL, PHOSPHORUS_TOTAL, PHOSPHORUS_ORTHO, TURBIDITY_HACH, TURBIDITY_NTU), ~ mean(.x, na.rm = TRUE)))
+
+combined_data %>%
+  select(Year, STATION_ID, StationDate, NITROGEN_TOTAL) %>%
+  filter(!is.na(NITROGEN_TOTAL))-> tn
+
+
 
 ```
 
