@@ -616,14 +616,6 @@ new_10plus_stations <- updated_10plus %>%
 
 print(new_10plus_stations) # 4 new stations in total
 
-new_10plus_stations$STATION_ID -> f
-
-f %in% unique(data$STATION_ID)
-f %in% unique(solids_data$STATION_ID)
-f %in% unique(N_data$STATION_ID)
-f %in% unique(tss_data$STATION_ID)
-
-
 ```
 
 # Create Data Subsets by Variable

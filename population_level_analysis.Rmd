@@ -1,0 +1,327 @@
+---
+title: "Population Level Analysis"
+output: html_document
+date: "2024-10-09"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+
+```
+
+```{r, message = FALSE}
+# Load the data
+data <- read_csv("data/processed_dataset.csv")
+
+  ## Remove 2024 obs since they are incomplete
+  data <- data %>%
+    filter(Year != 2024)
+    
+# This file contains a column with the number of years of observations. 
+metadata <- read_csv("Data/station_metadata.csv")
+
+```
+
+# Subset Stations of Interest
+
+ "For this, we will be working with the subset of stations that have at least 5 years of data (inclusive of those used in the trend analysis).  From the station metadata, I estimate there are ~175 stations that meet this minimum for Secchi, CHLa, TN and TP (~40 for TSS)."  (*Still min 3 Nobs, presumably*??)
+ 
+```{r}
+# Function to subset data based on a minimum years of observations threshold. All station-variables in `data` have already been filtered to include only those with min 3 measurements per year (May-Oct). 
+# In this case, 5 years of observations is the threshold.
+subset_variable_data <- function(metadata_column, threshold = 5) {
+  stations <- metadata %>%
+    filter(!!sym(metadata_column) >= threshold) %>%
+    pull(STATION_ID)
+  
+  return(data %>%
+    filter(STATION_ID %in% stations))
+}
+
+# Create the subset_data list using the function
+subset_data <- list(
+  SECCHI_DEPTH = subset_variable_data("nYears_Secchi"),   
+  CHLa = subset_variable_data("nYears_CHLA"),           
+  NITROGEN_TOTAL = subset_variable_data("nYears_totNitrogen"), 
+  PHOSPHORUS_TOTAL = subset_variable_data("nYears_totPhosphorus"), 
+  TSS = subset_variable_data("nYears_TSS"),
+  DIN = subset_variable_data("nYears_DIN")
+)
+
+```
+
+# Summary Statistics
+ 
+"I would like to get a file containing the long-term min, mean, median and max for each of the 6 variables (CHLa, TSS, etc.) by station for all the stations that meet the minimum of 5 years criterion."
+
+```{r}
+# Function to calculate summary statistics for each variable by station
+calculate_summary_stats <- function(data, variable) {
+  return(data %>%
+    group_by(STATION_ID) %>%
+    summarise(
+      min = min(!!sym(variable), na.rm = TRUE),
+      mean = mean(!!sym(variable), na.rm = TRUE),
+      median = median(!!sym(variable), na.rm = TRUE),
+      max = max(!!sym(variable), na.rm = TRUE)
+    ))
+}
+
+
+summary_list <- list() # List to hold summary stats for each variable
+
+# Use above function in for loop, storing results in list
+for (var in names(subset_data)) {
+  df <- subset_data[[var]]
+  summary_stats <- calculate_summary_stats(df, var)
+  
+  summary_list[[var]] <- summary_stats
+}
+
+# Bind into single df
+summary_df <- bind_rows(summary_list, .id = "variable") %>%
+  relocate(variable, .after = "STATION_ID")
+
+write_csv(summary_df, "data/5y_summaryStats.csv")
+
+```
+
+# Box-Whisker Plots
+
+ Next, I would like to see box-whisker plots for each variable with the data partitioned into 5-y increments.  For convenience, I would suggest making the last box a 4-y increment (2020-23) and then go backwards in 5-y increments (2000-04, 2005-09, 2010-14, 2015-19, etc.).  As we go back past 2000, the data become more sparse.  *It would be helpful to indicate on the plot the number of observations used to make each box.  We will likely adopt a cut-off below which we will not include that interval/variable, but I don't know offhand what that should be.*
+
+### Min year for each variable
+
+```{r}
+
+minyrs <- function(data, var){
+  x <- data %>%
+    filter(!is.na(!!sym(var)))
+  
+  yravg <- x %>%
+    group_by(STATION_ID, Year) %>%
+    summarize(mean = mean(!!sym(var), na.rm = TRUE))
+  
+  min_year <- min(yravg$Year)
+
+  return(min_year)
+  
+}
+
+min_years <- list()
+for (var in names(subset_data)) {
+  x <- subset_data[[var]]
+  y <- minyrs(x, var)
+  
+  min_years[[var]] <- y
+  
+}
+
+bind_rows(min_years, .id = "variable")
+
+```
+### Partition Data - 5y Increments
+
+Working backwards from 2023, with final increment (2019-2023) being 4 years.
+
+```{r}
+# --- Custom function --- #
+# This function creates intervals based on the min year of the variable, while also handling the 2019-2023 interval
+## Vectorize is needed because the function was written inititally to only work on single values
+## `interval_start <- floor((year - min_year) / 5) * 5 + min_year` -- > This line of code calculates the starting year of a 5-year interval based on the given year and the earliest year in the dataset (min_year):
+
+   ## year - min_year: Determines how many years have passed since the minimum year in the dataset.
+   ## / 5 and floor(): Divides the difference by 5 and rounds down to group the year into a 5-year block.
+   ##  * 5: Converts the block number back to the appropriate number of years (in multiples of 5).
+   ##  + min_year: Shifts the result back to the original time scale by adding the minimum year.
+
+create_intervals <- function(year) {
+  case_when(
+    year >= 2020 ~ "2020-2023",
+    year >= 2015 ~ "2015-2019",
+    year >= 2010 ~ "2010-2014",
+    year >= 2005 ~ "2005-2009",
+    year >= 2000 ~ "2000-2004",
+    year >= 1995 ~ "1995-1999",
+    year >= 1990 ~ "1990-1994",
+    year >= 1985 ~ "1985-1989",
+    year >= 1980 ~ "1980-1984",
+    year >= 1975 ~ "1975-1979",
+    year >= 1972 ~ "1972-1974",
+    TRUE ~ NA
+  )
+}
+
+
+
+# Use function to assign each May-Oct avg to an interval, by variable
+boxplot_data <- list()
+for (var in names(subset_data)) {
+  x <- subset_data[[var]] %>%
+    filter(!is.na(!!sym(var))) 
+  min_year <- min(x$Year)
+  
+  x_w_intervals <- x %>%
+    mutate(interval = create_intervals(Year))
+  
+  boxplot_data[[var]] <- x_w_intervals %>%
+        group_by(STATION_ID, Year) %>%
+        summarize(yearly_mean = mean(!!sym(var), na.rm = TRUE),
+                  interval = first(interval))
+
+}
+
+boxplot_data$NITROGEN_TOTAL -> x
+
+```
+
+## Create Box-Whisker Plots
+
+How many observations per interval, per variable? This informatio needs to be incorporated into the plots.
+
+```{r}
+
+# List of Nobs per interval for incorporation into plots
+obs_counts <- list()
+for (var in names(boxplot_data)) {
+  x <- boxplot_data[[var]]
+  x_counts <- x %>%
+    group_by(interval) %>%
+    summarise(n = n())
+  
+  obs_counts[[var]] <- x_counts
+}
+```
+
+
+```{r}
+library(ggplot2)
+
+# ------------ SECCHI DEPTH
+  plot_secchi <- ggplot(boxplot_data[["SECCHI_DEPTH"]], aes(x = interval, y = yearly_mean)) +
+    geom_boxplot(aes(fill = interval), outlier.shape = NA) +  
+    geom_jitter(width = 0.1, alpha = 0.2, size = 0.7) + 
+    geom_text(data = obs_counts[["SECCHI_DEPTH"]], aes(x = interval, y = max(boxplot_data[["SECCHI_DEPTH"]]$yearly_mean, na.rm = TRUE), 
+                                   label = paste("n =", n)), 
+            vjust = -0.5, size = 3, color = "black") +  # Add observation counts
+    labs(
+      title = "Secchi Depth",
+      subtitle = "No outliers excluded for visualization.",
+      x = "5-Year Interval",
+      y = "Depth (m)"
+    ) +
+    theme_minimal() +
+    theme(legend.position = "none",
+          plot.subtitle = element_text(size = 10),
+          axis.text.x = element_text(angle = 45, hjust = 1, size = 10))  
+  
+  print(plot_secchi)
+  ggsave("figures/secchi_boxplot.jpg", plot_secchi, width = 7, height = 5, units = "in", dpi = 600)
+  
+# ------------- Chlorophyll-A
+  ## Filter out CHLa values above 300 to minimize y axis distortion
+  boxplot_data[["CHLa"]] <- boxplot_data[["CHLa"]] %>%
+    filter(yearly_mean <= 50)
+  
+  plot_chla <- ggplot(boxplot_data[["CHLa"]], aes(x = interval, y = yearly_mean)) +
+    geom_boxplot(aes(fill = interval), outlier.shape = NA) +  
+    geom_jitter(width = 0.1, alpha = 0.2, size = 0.7) +  
+    geom_text(data = obs_counts[["CHLa"]], aes(x = interval, y = max(boxplot_data[["CHLa"]]$yearly_mean, na.rm = TRUE), 
+                                   label = paste("n =", n)), 
+            vjust = -0.5, size = 3, color = "black") +  # Add observation counts
+    labs(
+      title = "Chlorophyll-A",
+      subtitle = "CHLa values above 50 (n = 63) excluded for visualization purposes.",
+      x = "5-Year Interval",
+      y = "CHLa (\u03BCg L\u207B\u00B9)"
+    ) +
+    theme_minimal() +
+    theme(legend.position = "none",
+          plot.subtitle = element_text(size = 10),
+          axis.text.x = element_text(angle = 45, hjust = 1, size = 10))    
+  
+  print(plot_chla)
+  ggsave("figures/chla_boxplot.jpg", plot_chla, width = 7, height = 5, units = "in", dpi = 600)
+
+# ------------- Total Nitrogen
+  ## Filter out TN values above 2 to minimize y axis distortion
+  boxplot_data[["NITROGEN_TOTAL"]] <- boxplot_data[["NITROGEN_TOTAL"]] %>%
+    filter(yearly_mean <= 2)
+  
+  plot_tn <- ggplot(boxplot_data[["NITROGEN_TOTAL"]], aes(x = interval, y = yearly_mean)) +
+    geom_boxplot(aes(fill = interval), outlier.shape = NA) +
+    geom_jitter(width = 0.15, alpha = 0.2, size = 0.7) +
+    geom_text(data = obs_counts[["NITROGEN_TOTAL"]], 
+              aes(x = interval, y = max(boxplot_data[["NITROGEN_TOTAL"]]$yearly_mean, na.rm = TRUE), 
+                                                       label = paste("n =", n)), 
+            vjust = -0.5, size = 3, color = "black") +  
+    labs(
+      title = "Total Nitrogen",
+      subtitle = "TN values above 2 (n = 28) excluded for visualization purposes.",
+      x = "5-Year Interval",
+      y = "TN (mg N L\u207B\u00B9)"
+  ) +
+    theme_minimal() +
+    theme(legend.position = "none",
+        plot.subtitle = element_text(size = 10),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 10))   
+  
+  print(plot_tn)
+  ggsave("figures/tn_boxplot.jpg", plot_tn, width = 7, height = 5, units = "in", dpi = 600)
+
+# ------------- Total Phosphorus
+  ## Filter out TP values above .3 to minimize y axis distortion
+  boxplot_data[["PHOSPHORUS_TOTAL"]] <- boxplot_data[["PHOSPHORUS_TOTAL"]] %>%
+    filter(yearly_mean <= .3)
+  
+  plot_tp <- ggplot(boxplot_data[["PHOSPHORUS_TOTAL"]], aes(x = interval, y = yearly_mean)) +
+    geom_boxplot(aes(fill = interval), outlier.shape = NA) +  
+    geom_jitter(width = 0.15, alpha = 0.2, size = 0.7) +
+    geom_text(data = obs_counts[["PHOSPHORUS_TOTAL"]], 
+              aes(x = interval, y = max(boxplot_data[["PHOSPHORUS_TOTAL"]]$yearly_mean, na.rm = TRUE), 
+                                                       label = paste("n =", n)), 
+            vjust = -0.5, size = 3, color = "black") +  
+    labs(
+      title = "Total Phosphorus",
+      subtitle = "TP values above .3 (n = 21) excluded for visualization purposes.",
+      x = "5-Year Interval",
+      y = "TP (mg N L\u207B\u00B9)"
+  ) +
+    theme_minimal() +
+    theme(legend.position = "none",
+        plot.subtitle = element_text(size = 10),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 10))    
+  
+  print(plot_tp)
+  ggsave("figures/tp_boxplot.jpg", plot_tp, width = 7, height = 5, units = "in", dpi = 600)
+  
+# ------------- Total Suspended Solids
+  ## Filter out TSS values above 50 (n = 34) to minimize y axis distortion
+  boxplot_data[["TSS"]] <- boxplot_data[["TSS"]] %>%
+    filter(yearly_mean <= 50)
+  
+  plot_tss <- ggplot(boxplot_data[["TSS"]], aes(x = interval, y = yearly_mean)) +
+    geom_boxplot(aes(fill = interval), outlier.shape = NA) +  
+    geom_jitter(width = 0.15, alpha = 0.2, size = 0.7) +
+    geom_text(data = obs_counts[["TSS"]], 
+              aes(x = interval, y = max(boxplot_data[["TSS"]]$yearly_mean, na.rm = TRUE), 
+                                                       label = paste("n =", n)), 
+            vjust = -0.5, size = 3, color = "black") +  
+    labs(
+      title = "Total Suspened Solids",
+      subtitle = "TSS values above 50 (n = 6) excluded for visualization purposes.",
+      x = "5-Year Interval",
+      y = "TSS (mg N L\u207B\u00B9)"
+  ) +
+    theme_minimal() +
+    theme(legend.position = "none",
+        plot.subtitle = element_text(size = 10),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 10))    
+  
+  print(plot_tss)
+  ggsave("figures/tss_boxplot.jpg", plot_tss, width = 7, height = 5, units = "in", dpi = 600)
+
+```
+
+

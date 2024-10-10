@@ -17,7 +17,7 @@ library(tidyverse)
 data <- read_csv("data/processed_dataset.csv")
 trends <- read_csv("data/longTerm_Annual_Regression_Statistics_ALLSTATIONS.csv")
 # This file contains a column with the number of years of observations. 
-metadata <- read_csv("Data/updated_metadata.csv")
+metadata <- read_csv("Data/station_metadata.csv")
 
 ```
 
@@ -35,6 +35,7 @@ Plotting mblm trend lines of this sort requires a data frame with the min and ma
 ### Deriving min and max years (x-axis limits for trend lines)
 
 ```{r}
+# !------ Use metadata from Part 1 file to create list containing all non NaN values by variable with 10+ yrs of obs------!#
 # Named vector for mapping metadata_column to var_col for use in function
 metadata_to_varcol <- c(
   "nYears_Secchi" = "SECCHI_DEPTH",
@@ -77,7 +78,7 @@ YearLims <- list()
 vars <- c("SECCHI_DEPTH", "CHLa", "NITROGEN_TOTAL", "PHOSPHORUS_TOTAL", "TSS", "DIN")
 
 for (var in vars) {
-  # Get the yearly averages by station for the current variable
+  # Subset the data for current var
   df <- subset_data[[var]]
   # Vector with unique stations for this variable
   the_stations <- unique(df$STATION_ID)
@@ -119,7 +120,7 @@ regressions_adjusted <- trends %>%
 
 ```
 
-# Data Viz: mblm slopes for all stations, by variable
+## Data Viz: mblm slopes for all stations, by variable
 
 ```{r}
 # This code block is for setting up the data for plotting. It adds a field for significance and one with units using unicode characters.
@@ -164,6 +165,7 @@ p1 <- ggplot(subset(plot_df, variable == "SECCHI_DEPTH")) +
   theme(legend.position = "none",
         panel.border = element_rect(colour = "black", fill=NA, size=.5),
         axis.title.y = element_text(size = 10.2), 
+        axis.text = element_text(color = "black"),
         axis.text.y = element_text(size = 8.5,  margin = margin(t = 0, r = 3, b = 0, l = 0)), 
         axis.text.x = element_text(size = 8.5, angle = 45, hjust = .95),
         legend.text = element_text(size = 8),  
@@ -189,9 +191,10 @@ p2 <- ggplot(subset(plot_df, variable == "CHLa")) +
         legend.key.height = unit(1, "cm"),
         panel.border = element_rect(colour = "black", fill=NA, size=.5),
         axis.title.y = element_text(size = 10.2), 
+        axis.text = element_text(color = "black"),
         axis.text.y = element_text(size = 8.5,  margin = margin(t = 0, r = 3, b = 0, l = 0)), 
         axis.text.x = element_text(size = 8.5, angle = 45, hjust = .95),
-        legend.text = element_text(size = 8),  
+        legend.text = element_text(size = 9),  
         legend.title = element_blank(),
         strip.text = element_text(size = 11),
         strip.placement = "outside",
@@ -213,6 +216,7 @@ p3 <- ggplot(subset(plot_df, variable == "TSS")) +
   theme(legend.position = "none",
         panel.border = element_rect(colour = "black", fill=NA, size=.5),
         axis.title.y = element_text(size = 10.2), 
+        axis.text = element_text(color = "black"),
         axis.text.y = element_text(size = 8.5,  margin = margin(t = 0, r = 3, b = 0, l = 0)), 
         axis.text.x = element_text(size = 8.5, angle = 45, hjust = .95),
         legend.text = element_text(size = 8),  
@@ -238,6 +242,7 @@ p4 <- ggplot(subset(plot_df, variable == "PHOSPHORUS_TOTAL")) +
   theme(legend.position = "none",
         panel.border = element_rect(colour = "black", fill=NA, size=.5),
         axis.title.x = element_text(size = 11.3), 
+        axis.text = element_text(color = "black"),    
         axis.title.y = element_text(size = 10.2),
         axis.text.y = element_text(size = 8.5,  margin = margin(t = 0, r = 3, b = 0, l = 0)), 
         axis.text.x = element_text(size = 8.5, angle = 45, hjust = .95),
@@ -265,6 +270,7 @@ p5 <- ggplot(subset(plot_df, variable == "NITROGEN_TOTAL")) +
   theme(legend.position = "none",
         panel.border = element_rect(colour = "black", fill=NA, size=.5),
         axis.title.y = element_text(size = 10.2), 
+        axis.text = element_text(color = "black"),       
         axis.text.y = element_text(size = 8.5,  margin = margin(t = 0, r = 3, b = 0, l = 0)), 
         axis.text.x = element_text(size = 8.5, angle = 45, hjust = .95),
         legend.text = element_text(size = 8),  
@@ -291,6 +297,7 @@ p6 <- ggplot(subset(plot_df, variable == "DIN")) +
   theme(legend.position = "none",
         panel.border = element_rect(colour = "black", fill=NA, size=.5),
         axis.title.y = element_text(size = 10.2), 
+        axis.text = element_text(color = "black"),        
         axis.text.y = element_text(size = 8.5,  margin = margin(t = 0, r = 3, b = 0, l = 0)), 
         axis.text.x = element_text(size = 8.5, angle = 45, hjust = .95),
         legend.text = element_text(size = 8),  
@@ -314,5 +321,39 @@ ggsave("publication_plot.jpg", width = 7, height = 7, units = "in", dpi = 1000)
 
 
 
-````
+```
+
+## fff
+
+Produce a file that contains the long-term mean and median values for stations included in the plot, i.e., the average of the yearly May-Oct averages for Secchi, CHLa, TSS, TN, TP and DIN. 
+
+```{r}
+stations <- unique(plot_df$STATION_ID)
+
+# Derive May-Oct Means for each year by station-variable
+stationAvgs <- list()
+
+for (var in names(subset_data)) {
+  df <- subset_data[[var]]
+  
+  # Group by Year and STATION_ID, and calculate the May-Oct average for the variable
+  sy_avgs <- df %>%
+    group_by(Year, STATION_ID) %>%
+    summarise(MAY_OCT_AVG = mean(!!sym(var), na.rm = TRUE))
+  
+  stationAvgs[[var]] <- sy_avgs
+}
+
+# Combine the station averages into a single data frame
+stationAvgs.df <- bind_rows(stationAvgs, .id = "variable") %>%
+  filter(STATION_ID %in% stations) %>%
+  group_by(STATION_ID, variable) %>%
+  summarise(mean = mean(MAY_OCT_AVG, na.rm = TRUE),
+            median = median(MAY_OCT_AVG, na.rm = TRUE))
+
+write_csv(stationAvgs.df, "data/stationAverages_longTerm.csv")
+
+```
+
+
 
