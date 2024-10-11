@@ -12,21 +12,18 @@ knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
 
 # This loads in the plots, which were generated in the file named 'pt2_longTermIntrannual_timeSeries.Rmd'
 load("all_plots_list.RData")
-library(cowplot) # For organizing plots into columns
 ```
 
 ```{r, echo=FALSE, results='asis', fig.width=6.5, fig.height=7}
 library(cowplot)
-secchi_stations1 <- unlist(strsplit("2-APP020.23 2-LCN000.20 2-PKC001.84 2-SPE000.17 4ACRR008.32", " "))
-secchi_stations2 <- unlist(strsplit("4ABSA000.62 4ABWR002.50 4ABWR010.55 4ABWR017.42 4ACCK001.80 4ACOA000.60 4AGIL002.39 4AROA158.22 4AROA163.76 4AROA167.34 4AROA175.63 4AROA180.21 4AROA183.64 4AROA192.94 4AROA196.05 4AWTH000.40 9-NEW087.14 9-NEW089.34 9-NEW092.66 9-NEW098.32 9-PKC000.00 9-PKC004.16", " "))
-chlaTrends_stations <- c("4AROA038.49", "8-NAR047.69", "8-NAR054.17", "9-PKC004.16")
-secchiTrends_stations <- c("1BCRO009.19", "4ASRE046.90")
+all_stations <- names(all_plots_list)
 
-stations_of_interest_10yrs <- c(secchi_stations2, chlaTrends_stations, secchiTrends_stations)
-all33_stations <- c(secchi_stations1, secchi_stations2, chlaTrends_stations, secchiTrends_stations)
+secchi_only_stations <- unlist(strsplit("2-APP020.23 2-LCN000.20 2-PKC001.84 2-SPE000.17 4ACRR008.32", " "))
+all_stations_filtered <- setdiff(all_stations, secchi_only_stations)  # stations for which all variables were examined
+
 
 # Display each station's combined plots
-for (station in stations_of_interest_10yrs) {
+for (station in all_stations_filtered) {
   # Print the station header as an RMarkdown header (### is level 3)
   cat("### Station: ", station, "\n\n")
   
@@ -43,7 +40,7 @@ for (station in stations_of_interest_10yrs) {
 
 ```{r, echo=FALSE, results='asis', fig.width=3.25, fig.height=3.25}
 # Display Secchi only plots
-for (station in secchi_stations1) {
+for (station in secchi_only_stations) {
   # Print the station header as an RMarkdown header (### is level 3)
   cat("### Station: ", station, "\n\n")
   

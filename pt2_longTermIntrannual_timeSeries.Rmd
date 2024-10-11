@@ -7,7 +7,6 @@ toc_float: true
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-
 library(tidyverse)
 source("C:/Users/andre/my_functions.R")
 
@@ -21,7 +20,7 @@ data <- read_csv("Data/processed_dataset.csv")
 
 # Visualizing Time series with Model Fits
 
-From Paul: "  I have come up with a list of 33 stations (below) for which I would like you to generate time series plots for variables that have at least 10 years of data inclusive of CHLa, Secchi, TN, DIN, TP and TSS.  In the output file, the plots should be organized by station (e.g., CHLa, TN and Secchi for station 1, then station 2, etc.), so I can compare trends.  Note that these plots should be based on the May-Oct average values and show the model line with slope and p statistics."
+From Paul: "I have come up with a list of 33 stations (below) for which I would like you to generate time series plots for variables that have at least 10 years of data inclusive of CHLa, Secchi, TN, DIN, TP and TSS.  In the output file, the plots should be organized by station (e.g., CHLa, TN and Secchi for station 1, then station 2, etc.), so I can compare trends.  Note that these plots should be based on the May-Oct average values and show the model line with slope and p statistics."
 
 
 ### Vectorize the station IDs
@@ -34,11 +33,18 @@ secchiTrends_stations <- c("1BCRO009.19", "4ASRE046.90")
 
 stations_of_interest_10yrs <- c(secchi_stations2, chlaTrends_stations, secchiTrends_stations)
 all33_stations <- c(secchi_stations1, secchi_stations2, chlaTrends_stations, secchiTrends_stations)
+# Lake Anna stations
+## These stations are not included in the 33 stations of interest. They are from the subsequent LACA data set that was obtained after originally identifying SoI and generating the time series plots.
+laca.data <- openxlsx::read.xlsx("Data/Lake Anna Suppl.xlsx", sheet = 2)
+laca.stations <- unique(laca.data$`DEQ.Site.#`)
+laca.stations <- laca.stations[laca.stations %in% unique(data$STATION_ID)]  # Some LACA stations did not make into processed data (no station-year with 3 Nobs)
 
+updated.SoI <- unique(c(stations_of_interest_10yrs, laca.stations)) # all stations of interest MINUS 5 secchi only stations
+updated.SOI_COMPLETE <- unique(c(all33_stations, laca.stations)) # all stations of interest
 
 # Subset data to only include these stations
 data.sbst <- data %>% 
-  filter(STATION_ID %in% stations_of_interest_10yrs) %>%
+  filter(STATION_ID %in% updated.SoI) %>%
   select(-PHOSPHORUS_ORTHO, -TURBIDITY_HACH, TURBIDITY_NTU, AMMONIA_TOTAL, NITRATE_TOTAL)
 
 ```
@@ -56,7 +62,7 @@ vars <- c("CHLa", "SECCHI_DEPTH", "NITROGEN_TOTAL", "DIN", "PHOSPHORUS_TOTAL", "
 
 stationAvgs_10yrs <- list()
 
-for (station in unique(stations_of_interest_10yrs)) {
+for (station in updated.SoI) {
   
   station_avgs <- list()
   
@@ -86,8 +92,10 @@ for (station in unique(stations_of_interest_10yrs)) {
       }
     }
   }
-  # Add all variables for the current station to the all_stations_avgs list
-  stationAvgs_10yrs[[station]] <- station_avgs
+  # Only add station to the final list if it has valid averages for at least one variable
+  if (length(station_avgs) > 0) {
+    stationAvgs_10yrs[[station]] <- station_avgs
+  }
 }
 
 
@@ -167,7 +175,7 @@ trends_func <- function(station, variable) {
 # Trends for stations of interest/variables with 10+ yr and 3+ obs/yr
 trends_results <- list()
 
-for (station in unique(all33_stations)) {
+for (station in updated.SOI_COMPLETE) {
   for (variable in vars) {
     if (variable %in% names(yearlyAvgs_complete[[station]])) {
   trends_results[[station]][[variable]] <- trends_func(station, variable)
@@ -183,7 +191,7 @@ for (station in unique(all33_stations)) {
 ```{r `regression stats`}
 regression_statistics <- list()
 
-for (station in unique(all33_stations)) {
+for (station in names(trends_results)) {
       
   modelSums <- trends_results[[station]]
   
@@ -234,7 +242,7 @@ This required first determining the minimum year for each variable at each stati
 ```{r}
 minYear <- list()
 
-for (station in unique(all33_stations)) {
+for (station in unique(regressions_df$STATION_ID)) {
   # Filter variables that exist in the current station
   station_vars <- vars[vars %in% names(yearlyAvgs_complete[[station]])]
   
@@ -315,9 +323,10 @@ save(all_plots_list, file = "all_plots_list.RData")
 ```
 
 
+
 # Regressions for All Stations-Variables
 
-After completing the above workflow, Paul requested that I generate a file with regression statistics for all stations-variables with at least 10 years of data based on May-Oct averages. In effect, do what was done above, but include all stations as opposed to the 33 stations of interest.
+After completing the above workflow, Paul requested that I generate a file with regression statistics (but without time series plots) for all stations-variables with at least 10 years of data based on May-Oct averages. In effect, do what was done above, but include all stations as opposed to the 33 stations of interest.
 
 ```{r}
 # This file contains a column with the number of years of observations. 

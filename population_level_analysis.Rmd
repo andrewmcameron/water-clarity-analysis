@@ -91,39 +91,10 @@ write_csv(summary_df, "data/5y_summaryStats.csv")
 
  Next, I would like to see box-whisker plots for each variable with the data partitioned into 5-y increments.  For convenience, I would suggest making the last box a 4-y increment (2020-23) and then go backwards in 5-y increments (2000-04, 2005-09, 2010-14, 2015-19, etc.).  As we go back past 2000, the data become more sparse.  *It would be helpful to indicate on the plot the number of observations used to make each box.  We will likely adopt a cut-off below which we will not include that interval/variable, but I don't know offhand what that should be.*
 
-### Min year for each variable
 
-```{r}
-
-minyrs <- function(data, var){
-  x <- data %>%
-    filter(!is.na(!!sym(var)))
-  
-  yravg <- x %>%
-    group_by(STATION_ID, Year) %>%
-    summarize(mean = mean(!!sym(var), na.rm = TRUE))
-  
-  min_year <- min(yravg$Year)
-
-  return(min_year)
-  
-}
-
-min_years <- list()
-for (var in names(subset_data)) {
-  x <- subset_data[[var]]
-  y <- minyrs(x, var)
-  
-  min_years[[var]] <- y
-  
-}
-
-bind_rows(min_years, .id = "variable")
-
-```
 ### Partition Data - 5y Increments
 
-Working backwards from 2023, with final increment (2019-2023) being 4 years.
+Working backwards from 2023, with first increment (2019-2023) being 4 years.
 
 ```{r}
 # --- Custom function --- #
@@ -172,16 +143,11 @@ for (var in names(subset_data)) {
 
 }
 
-boxplot_data$NITROGEN_TOTAL -> x
-
 ```
-
-## Create Box-Whisker Plots
 
 How many observations per interval, per variable? This informatio needs to be incorporated into the plots.
 
 ```{r}
-
 # List of Nobs per interval for incorporation into plots
 obs_counts <- list()
 for (var in names(boxplot_data)) {
@@ -192,13 +158,42 @@ for (var in names(boxplot_data)) {
   
   obs_counts[[var]] <- x_counts
 }
+
 ```
 
+## Interval statistics
+
+Generate a file of the statistics associated with the box-whisker results (N Obs and median values for each span of years shown in the plots).
+
+```{r}
+summarize_intervals <- function(x, y) {
+  x %>%
+    left_join(y, by = "interval") %>%
+    group_by(interval) %>%
+    summarise(
+      n = first(n),
+      median = median(yearly_mean, na.rm = TRUE)
+    )
+}
+
+interval_summaries <- list()
+for (var in names(boxplot_data)) {
+  interval_summaries[[var]] <- summarize_intervals(boxplot_data[[var]], obs_counts[[var]])
+}
+
+interval_summary.df <- bind_rows(interval_summaries, .id = "variable") %>%
+  relocate(variable, .after = "interval")
+
+write_csv(interval_summary.df, "data/population_boxplot_interval_summaries.csv")
+
+```
+
+## Create Box-Whisker Plots
 
 ```{r}
 library(ggplot2)
-
-# ------------ SECCHI DEPTH
+ 
+# ------------ SECCHI DEPTH  -------------------------
   plot_secchi <- ggplot(boxplot_data[["SECCHI_DEPTH"]], aes(x = interval, y = yearly_mean)) +
     geom_boxplot(aes(fill = interval), outlier.shape = NA) +  
     geom_jitter(width = 0.1, alpha = 0.2, size = 0.7) + 
@@ -219,7 +214,7 @@ library(ggplot2)
   print(plot_secchi)
   ggsave("figures/secchi_boxplot.jpg", plot_secchi, width = 7, height = 5, units = "in", dpi = 600)
   
-# ------------- Chlorophyll-A
+# ------------- Chlorophyll-A  -------------------------
   ## Filter out CHLa values above 300 to minimize y axis distortion
   boxplot_data[["CHLa"]] <- boxplot_data[["CHLa"]] %>%
     filter(yearly_mean <= 50)
@@ -243,8 +238,37 @@ library(ggplot2)
   
   print(plot_chla)
   ggsave("figures/chla_boxplot.jpg", plot_chla, width = 7, height = 5, units = "in", dpi = 600)
+  
+    # ------------ CHLa log base 10 transformed -------------------------
+        trnsfrm.data <- boxplot_data[["CHLa"]] %>%
+          mutate(log10 = log10(yearly_mean))
+  
+          # Filter outliers above 2 to minimize y axis distortion
+          trnsfrm.data <- trnsfrm.data %>%
+            filter(log10 <= 2)
+  
+        plot_chlalog10 <- ggplot(trnsfrm.data, aes(x = interval, y = log10)) +
+          geom_boxplot(aes(fill = interval), outlier.shape = NA) +  
+          geom_jitter(width = 0.1, alpha = 0.2, size = 0.7) +  
+          geom_text(data = obs_counts[["CHLa"]], aes(x = interval, y = max(trnsfrm.data$log10, na.rm = TRUE), 
+                                         label = paste("n =", n)), 
+                  vjust = -0.5, size = 3, color = "black") +  # Add observation counts
+          labs(
+            title = "Chlorophyll-A (log\u2081\u2080 transformed)",
+            subtitle = "log\u2081\u2080(CHLa) values above 2 (n = 11) excluded for visualization purposes.",
+            x = "5-Year Interval",
+            y = "log\u2081\u2080(CHLa) (\u03BCg L\u207B\u00B9)"
+          ) +
+          theme_minimal() +
+          theme(legend.position = "none",
+                plot.subtitle = element_text(size = 10),
+                axis.text.x = element_text(angle = 45, hjust = 1, size = 10))   
+        
+        print(plot_chlalog10)
+        ggsave("figures/log10_chla_boxplot.jpg", plot_chlalog10, width = 7, height = 5, units = "in", dpi = 600)
+    
 
-# ------------- Total Nitrogen
+# ------------- Total Nitrogen -------------------------
   ## Filter out TN values above 2 to minimize y axis distortion
   boxplot_data[["NITROGEN_TOTAL"]] <- boxplot_data[["NITROGEN_TOTAL"]] %>%
     filter(yearly_mean <= 2)
@@ -270,7 +294,7 @@ library(ggplot2)
   print(plot_tn)
   ggsave("figures/tn_boxplot.jpg", plot_tn, width = 7, height = 5, units = "in", dpi = 600)
 
-# ------------- Total Phosphorus
+# ------------- Total Phosphorus -------------------------
   ## Filter out TP values above .3 to minimize y axis distortion
   boxplot_data[["PHOSPHORUS_TOTAL"]] <- boxplot_data[["PHOSPHORUS_TOTAL"]] %>%
     filter(yearly_mean <= .3)
@@ -296,7 +320,7 @@ library(ggplot2)
   print(plot_tp)
   ggsave("figures/tp_boxplot.jpg", plot_tp, width = 7, height = 5, units = "in", dpi = 600)
   
-# ------------- Total Suspended Solids
+# ------------- Total Suspended Solids-------------------------
   ## Filter out TSS values above 50 (n = 34) to minimize y axis distortion
   boxplot_data[["TSS"]] <- boxplot_data[["TSS"]] %>%
     filter(yearly_mean <= 50)
