@@ -21,8 +21,8 @@ library(tidyverse)
 
 ```{r, message = FALSE}
 # Load the data
-data <- read_csv("Data/processed_dataset.csv")
-stations.df <- read_csv("Data/lakeAvgStations_list.csv")
+data <- read_csv("data/processed_dataset.csv")
+stations.df <- read_csv("data/lake_averages/lakeAvgStations_list.csv")
 stations <- unique(stations.df$STATION_ID)
 lakes <- unique(stations.df$Lake)
 
@@ -33,8 +33,6 @@ data.sub <- data %>%
 
 # Define vector for looping through variables
 vars <- c("CHLa", "PHOSPHORUS_TOTAL", "NITROGEN_TOTAL", "DIN", "TSS", "SECCHI_DEPTH")
-
-
 
 ```
 
@@ -103,7 +101,10 @@ lakeAvgs <- mayOctAvgs_df %>%
   summarize(LakeAvg = mean(MAY_OCT_AVG, na.rm = TRUE)) %>%
   ungroup()
 
+write_csv(lakeAvgs, "data/lake_averages/lakeAverages_byVariable_Year.csv")
+
 ```
+
 # MBLM Trends
 
 ### Custom function to derive trends
@@ -144,13 +145,12 @@ trends_results <- list()
 
 for (l in lakes) {
   lake_vars <- unique(lakeAvgs[lakeAvgs$Lake == l,]$variable)
+  p <- vars[vars %in% lake_vars]
   
-  for (variable in lake_vars) {
-      trends_results[[l]][[variable]] <- trends_func(l, variable)
+  for (var in p) {
+      trends_results[[l]][[var]] <- trends_func(l, var)
   }
 }
-
-
 
 ```
 
@@ -165,7 +165,7 @@ for (lake in names(trends_results)) {
   modelSums <- trends_results[[lake]]
   
       reg.df <- data.frame(Lake = lake,
-                           variable = vars[vars %in% unique(lakeAvgs[lakeAvgs$Lake == lake,]$variable)],
+                           variable = vars[vars %in% names(modelSums)],
                model_slope = rep(NA, length(trends_results[[lake]])),
                model_MAD = rep(NA, length(trends_results[[lake]])),
                model_pval = rep(NA, length(trends_results[[lake]])),
@@ -189,8 +189,384 @@ for (lake in names(trends_results)) {
 # ------- Create data frames from lists -------
 lakeAvgs_regressionStats <- bind_rows(regression_statistics) 
 
-write_csv(lakeAvgs_regressionStats, "data/lakeAverage_regressionStats.csv")
+write_csv(lakeAvgs_regressionStats, "data/lake_averages/lakeAverage_regressionStats.csv")
 
 ```
+
+# Visualize Trends
+
+I will create figures of gridded plots as I did for select stations in the pt. 2 file. Rather than by station, each figure will be by lake. 
+
+```{r, message = FALSE}
+# `cowplot` package for use in arranging the plots into single figures
+library(cowplot)
+```
+
+### Adjusted model intercept
+
+Because the model intercept is based on x=0, and the x-axes are somewhere between 1980 and 200x, I created an adjusted model intercept based on the following formula:
+
+`adjusted_intercept = model_intercept + model_slope * min(Year)`
+
+This required first determining the minimum year for each variable at each station
+
+```{r}
+minYear <- list()
+
+for (lake in unique(lakeAvgs_regressionStats$Lake)) {
+  # Filter variables that exist in the current station
+  station_vars <- vars[vars %in% (lakeAvgs_regressionStats %>%
+                         filter(Lake == lake) %>%
+                         pull(variable))]
+
+  # Initialize the data frame for storing minimum years
+  minYear.df <- data.frame(Lake = lake,
+                           variable = station_vars,
+                           minYear = rep(NA, length(station_vars)),
+                           maxYear = rep(NA, length(station_vars))
+                           )
+  
+  # Loop through the variables and calculate the minimum year
+  for (i in seq_along(station_vars)) {
+    var <- station_vars[i]
+    minYear.df$minYear[i] <- min(lakeAvgs %>%
+                                  filter(Lake == lake, variable == var) %>%
+                                  pull(Year))
+    minYear.df$maxYear[i] <- max(lakeAvgs %>%
+                                  filter(Lake == lake, variable == var) %>%
+                                  pull(Year))
+  }
+  
+  # Store the data frame for this station
+  minYear[[lake]] <- minYear.df
+}
+
+minYear_df <- bind_rows(minYear)
+
+```
+
+Now use  `minYear.df` to calculate the adjusted intercept
+
+```{r}
+regressions_adjusted <- lakeAvgs_regressionStats %>%
+  left_join(minYear_df, by = c("Lake", "variable")) %>%
+  mutate(adjusted_intercept = model_intercept + model_slope * minYear)
+
+```
+
+
+
+Additional fields can be added to the data frame to facilitate the plotting process. This includes a field for defining p-val rendering and a field for y axis labeling.
+
+The regression statistics still need adjusted y-intercepts, as well.
+
+```{r}
+regressions_adjusted <- regressions_adjusted %>%
+  mutate(pval_render = case_when(
+    model_pval > 0.05 ~ paste0("p = ", formatC(model_pval, digits = 2, format = "f")),
+    model_pval < 0.05 & model_pval >= 0.001 ~ paste0("p = ", formatC(model_pval, digits = 3, format = "f")),
+    model_pval < 0.001 ~ "p < 0.001"
+  ),
+  y_label = case_when(
+    variable == "CHLa" ~ "CHLa (\u03BCg L\u207B\u00B9)",
+    variable == "PHOSPHORUS_TOTAL" ~ "TP (mg L\u207B\u00B9)",
+    variable == "NITROGEN_TOTAL" ~ "TN (mg L\u207B\u00B9)",
+    variable == "TSS" ~ "TSS (mg L\u207B\u00B9)",
+    variable == "SECCHI_DEPTH" ~ "Secchi Depth (m)",
+    variable == "DIN" ~ "DIN (mg L\u207B\u00B9)"
+  ))
+
+```
+
+
+### a. Claytor Lake
+
+```{r, fig.width=6.5, fig.height=7}
+lake <- "Claytor Lake"
+data_claytor <- regressions_adjusted %>%
+  filter(Lake == lake)
+
+# List to hold the plots for this station
+claytor_list <- list()
+
+# Set a standard x-axis range across all plots (adjust as per data)
+min_year <- 1973
+max_year <- 2025  # Set the max year based on your data
+
+
+# ! ---- Plot Generation ----- ! #
+for (current_var in data_claytor$variable)  {
+  df_avgs <- lakeAvgs %>%
+    filter(Lake == lake,
+           variable == current_var)
+  df_reg <- data_claytor %>%
+    filter(variable == current_var)
+  
+  # Extract the y_label for the current variable
+  current_y_label <- df_reg$y_label[1]
+  # max y value for dynamic range -- needed, since the ylim needs to be set at 0 on the low end
+  max_y <- max(df_avgs$LakeAvg, na.rm = TRUE) * 1.2
+  
+  # Calculate position for p-value: place it dynamically near the upper right, clear of the data points
+  pval_x_pos <- max(df_avgs$Year) - 5  # Adjust the 5 to change how far left from the max Year
+  pval_y_pos <- max_y * 0.95           # Place it slightly below the upper limit of the y-axis
+  
+  var_plot <- ggplot(df_avgs, aes(x = Year, y = LakeAvg)) +
+    geom_point() +
+      # Add p-value inside the plot, positioning dynamically
+      annotate("text", x = pval_x_pos, y = pval_y_pos, 
+               label = df_reg$pval_render, size = 3.2, hjust = 1) +
+      # Regression line
+      annotate("segment", x = min(df_avgs$Year), 
+               xend = max(df_avgs$Year), 
+               y = df_reg$adjusted_intercept, 
+               yend = df_reg$adjusted_intercept + df_reg$model_slope * (max(df_avgs$Year) - min(df_avgs$Year)),
+               color = "red", linewidth = .42, alpha = .6) +
+      labs(title = NULL,
+           x = "Year", y = current_y_label) +  # Use the extracted y_label
+      scale_y_continuous(limits = c(0, max_y), labels = function(y) ifelse(y == 0, "0", format(y, digits = 1, nsmall = 0))) +
+      # Set x-axis limits to be consistent
+      scale_x_continuous(limits = c(min_year, max_year)) +
+      theme_minimal() +
+      # Make x and y axes black without adding a border around the entire plot
+      theme(
+        axis.line = element_line(color = "black"),  # Make x and y axes black
+        axis.title = element_text(size = 9.5),        # Adjust axis title size if needed
+        axis.text = element_text(size = 7.5, color = "black"),         # Adjust axis text size
+        plot.subtitle = element_text(size = 9),     # Adjust subtitle size
+        plot.margin = unit(c(.5, .5, .5, .5), "cm")
+      )
+  
+  claytor_list[[current_var]] <- var_plot
+}
+
+  
+  claytorAvgs_plot <- plot_grid(plotlist = claytor_list, ncol = 2,
+                              vjust = 4)
+  print(claytorAvgs_plot)
+  
+ggsave("claytorAvgs_plot.jpg", width = 6.5, height = 7, units = "in", dpi = 1000)
+
+```
+
+### b. Smith Mountain Lake
+
+```{r, fig.width=6.5, fig.height=7}
+lake <- "SML"
+data_SML <- regressions_adjusted %>%
+  filter(Lake == lake)
+
+# List to hold the plots for this station
+SML_list <- list()
+
+# Set a standard x-axis range across all plots (adjust as per data)
+min_year <- minYear_df %>%
+  filter(Lake == lake) %>%
+  pull(minYear) %>%
+  min()
+max_year <- 2025  # Set the max year based on your data
+
+
+# ! ---- Plot Generation ----- ! #
+for (current_var in data_SML$variable)  {
+  df_avgs <- lakeAvgs %>%
+    filter(Lake == lake,
+           variable == current_var)
+  df_reg <- data_SML %>%
+    filter(variable == current_var)
+  
+  # Extract the y_label for the current variable
+  current_y_label <- df_reg$y_label[1]
+  # max y value for dynamic range -- needed, since the ylim needs to be set at 0 on the low end
+  max_y <- max(df_avgs$LakeAvg, na.rm = TRUE) * 1.2
+  
+  # Calculate position for p-value: place it dynamically near the upper right, clear of the data points
+  pval_x_pos <- max(df_avgs$Year) - 5  # Adjust the 5 to change how far left from the max Year
+  pval_y_pos <- max_y * 0.95           # Place it slightly below the upper limit of the y-axis
+  
+  var_plot <- ggplot(df_avgs, aes(x = Year, y = LakeAvg)) +
+    geom_point() +
+      # Add p-value inside the plot, positioning dynamically
+      annotate("text", x = pval_x_pos, y = pval_y_pos, 
+               label = df_reg$pval_render, size = 3.2, hjust = 1) +
+      # Regression line
+      annotate("segment", x = min(df_avgs$Year), 
+               xend = max(df_avgs$Year), 
+               y = df_reg$adjusted_intercept, 
+               yend = df_reg$adjusted_intercept + df_reg$model_slope * (max(df_avgs$Year) - min(df_avgs$Year)),
+               color = "red", linewidth = .42, alpha = .6) +
+      labs(title = NULL,
+           x = "Year", y = current_y_label) +  # Use the extracted y_label
+      scale_y_continuous(limits = c(0, max_y), labels = function(y) ifelse(y == 0, "0", format(y, digits = 1, nsmall = 0))) +
+      # Set x-axis limits to be consistent
+      scale_x_continuous(limits = c(min_year, max_year)) +
+      theme_minimal() +
+      # Make x and y axes black without adding a border around the entire plot
+      theme(
+        axis.line = element_line(color = "black"),  # Make x and y axes black
+        axis.title = element_text(size = 9.5),        # Adjust axis title size if needed
+        axis.text = element_text(size = 7.5, color = "black"),         # Adjust axis text size
+        plot.subtitle = element_text(size = 9),     # Adjust subtitle size
+        plot.margin = unit(c(.5, .5, .5, .5), "cm")
+      )
+  
+  SML_list[[current_var]] <- var_plot
+}
+
+  
+  SMLAvgs_plot <- plot_grid(plotlist = SML_list, ncol = 2,
+                              vjust = 4)
+  print(SMLAvgs_plot)
+  
+ggsave("SMLAvgs_plot.jpg", width = 6.5, height = 7, units = "in", dpi = 1000)
+
+```
+
+### c. Kerr Reservoir
+
+```{r, fig.width=6.5, fig.height=7}
+lake <- "Kerr Reservoir"
+data_kerr <- regressions_adjusted %>%
+  filter(Lake == lake)
+
+# List to hold the plots for this station
+kerr_list <- list()
+
+# Set a standard x-axis range across all plots (adjust as per data)
+min_year <- minYear_df %>%
+  filter(Lake == lake) %>%
+  pull(minYear) %>%
+  min()
+max_year <- 2025  # Set the max year based on your data
+
+
+# ! ---- Plot Generation ----- ! #
+for (current_var in data_kerr$variable)  {
+  df_avgs <- lakeAvgs %>%
+    filter(Lake == lake,
+           variable == current_var)
+  df_reg <- data_kerr %>%
+    filter(variable == current_var)
+  
+  # Extract the y_label for the current variable
+  current_y_label <- df_reg$y_label[1]
+  # max y value for dynamic range -- needed, since the ylim needs to be set at 0 on the low end
+  max_y <- max(df_avgs$LakeAvg, na.rm = TRUE) * 1.2
+  
+  # Calculate position for p-value: place it dynamically near the upper right, clear of the data points
+  pval_x_pos <- max(df_avgs$Year) - 5  # Adjust the 5 to change how far left from the max Year
+  pval_y_pos <- max_y * 0.95           # Place it slightly below the upper limit of the y-axis
+  
+  var_plot <- ggplot(df_avgs, aes(x = Year, y = LakeAvg)) +
+    geom_point() +
+      # Add p-value inside the plot, positioning dynamically
+      annotate("text", x = pval_x_pos, y = pval_y_pos, 
+               label = df_reg$pval_render, size = 3.2, hjust = 1) +
+      # Regression line
+      annotate("segment", x = min(df_avgs$Year), 
+               xend = max(df_avgs$Year), 
+               y = df_reg$adjusted_intercept, 
+               yend = df_reg$adjusted_intercept + df_reg$model_slope * (max(df_avgs$Year) - min(df_avgs$Year)),
+               color = "red", linewidth = .42, alpha = .6) +
+      labs(title = NULL,
+           x = "Year", y = current_y_label) +  # Use the extracted y_label
+      scale_y_continuous(limits = c(0, max_y), labels = function(y) ifelse(y == 0, "0", format(y, digits = 1, nsmall = 0))) +
+      # Set x-axis limits to be consistent
+      scale_x_continuous(limits = c(min_year, max_year)) +
+      theme_minimal() +
+      # Make x and y axes black without adding a border around the entire plot
+      theme(
+        axis.line = element_line(color = "black"),  # Make x and y axes black
+        axis.title = element_text(size = 9.5),        # Adjust axis title size if needed
+        axis.text = element_text(size = 7.5, color = "black"),         # Adjust axis text size
+        plot.subtitle = element_text(size = 9),     # Adjust subtitle size
+        plot.margin = unit(c(.5, .5, .5, .5), "cm")
+      )
+  
+  kerr_list[[current_var]] <- var_plot
+}
+
+  
+  kerrAvgs_plot <- plot_grid(plotlist = kerr_list, ncol = 2,
+                              vjust = 4)
+  print(kerrAvgs_plot)
+  
+ggsave("kerrAvgs_plot.jpg", width = 6.5, height = 7, units = "in", dpi = 1000)
+
+```
+
+### d. Lake Anna
+
+```{r, fig.width=6.5, fig.height=7}
+lake <- "Lake Anna"
+data_anna <- regressions_adjusted %>%
+  filter(Lake == lake)
+
+# List to hold the plots for this station
+anna_list <- list()
+
+# Set a standard x-axis range across all plots (adjust as per data)
+min_year <- minYear_df %>%
+  filter(Lake == lake) %>%
+  pull(minYear) %>%
+  min()
+max_year <- 2025  # Set the max year based on your data
+
+
+# ! ---- Plot Generation ----- ! #
+for (current_var in data_anna$variable)  {
+  df_avgs <- lakeAvgs %>%
+    filter(Lake == lake,
+           variable == current_var)
+  df_reg <- data_anna %>%
+    filter(variable == current_var)
+  
+  # Extract the y_label for the current variable
+  current_y_label <- df_reg$y_label[1]
+  # max y value for dynamic range -- needed, since the ylim needs to be set at 0 on the low end
+  max_y <- max(df_avgs$LakeAvg, na.rm = TRUE) * 1.2
+  
+  # Calculate position for p-value: place it dynamically near the upper right, clear of the data points
+  pval_x_pos <- max(df_avgs$Year) - 5  # Adjust the 5 to change how far left from the max Year
+  pval_y_pos <- max_y * 0.95           # Place it slightly below the upper limit of the y-axis
+  
+  var_plot <- ggplot(df_avgs, aes(x = Year, y = LakeAvg)) +
+    geom_point() +
+      # Add p-value inside the plot, positioning dynamically
+      annotate("text", x = pval_x_pos, y = pval_y_pos, 
+               label = df_reg$pval_render, size = 3.2, hjust = 1) +
+      # Regression line
+      annotate("segment", x = min(df_avgs$Year), 
+               xend = max(df_avgs$Year), 
+               y = df_reg$adjusted_intercept, 
+               yend = df_reg$adjusted_intercept + df_reg$model_slope * (max(df_avgs$Year) - min(df_avgs$Year)),
+               color = "red", linewidth = .42, alpha = .6) +
+      labs(title = NULL,
+           x = "Year", y = current_y_label) +  # Use the extracted y_label
+      scale_y_continuous(limits = c(0, max_y), labels = function(y) ifelse(y == 0, "0", format(y, digits = 1, nsmall = 0))) +
+      # Set x-axis limits to be consistent
+      scale_x_continuous(limits = c(min_year, max_year)) +
+      theme_minimal() +
+      # Make x and y axes black without adding a border around the entire plot
+      theme(
+        axis.line = element_line(color = "black"),  # Make x and y axes black
+        axis.title = element_text(size = 9.5),        # Adjust axis title size if needed
+        axis.text = element_text(size = 7.5, color = "black"),         # Adjust axis text size
+        plot.subtitle = element_text(size = 9),     # Adjust subtitle size
+        plot.margin = unit(c(.5, .5, .5, .5), "cm")
+      )
+  
+  anna_list[[current_var]] <- var_plot
+}
+
+  
+  annaAvgs_plot <- plot_grid(plotlist = anna_list, ncol = 2,
+                              vjust = 4)
+  print(annaAvgs_plot)
+  
+ggsave("LakeAnnaAvgs_plot.jpg", width = 6.5, height = 7, units = "in", dpi = 1000)
+
+```
+
 
 

@@ -1,5 +1,5 @@
 ---
-title: "Publication Plot(s)"
+title: "Publication Plot: Station-Level Long Term Trends"
 author: "Andrew Cameron"
 date: "2024-10-04"
 output: html_document

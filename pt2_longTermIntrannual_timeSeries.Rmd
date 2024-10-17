@@ -26,10 +26,12 @@ From Paul: "I have come up with a list of 33 stations (below) for which I would 
 ### Vectorize the station IDs
 
 ```{r}
-#These stations have the longest record of Secchi data (since 1980), but were not included among trend sites.
+# These stations have the longest record of Secchi data (since 1980), but were not included among trend sites. 
+# ONLY Secchi trends are of interest at these 4 sites.
 secchi_stations1 <- unlist(strsplit("2-APP020.23 2-LCN000.20 2-PKC001.84 2-SPE000.17 4ACRR008.32", " "))
 
-#These stations have the best long-term records for Secchi with >25 years of data since ~1995.  These sites also have good records for CHLa, TN, TP, and in some cases, TSS.
+# For all other sites, we are interested in trends for multiple variables.
+# These stations have the best long-term records for Secchi with >25 years of data since ~1995.  These sites also have good records for CHLa, TN, TP, and in some cases, TSS.
 secchi_stations2 <- unlist(strsplit("4ABSA000.62 4ABWR002.50 4ABWR010.55 4ABWR017.42 4ACCK001.80 4ACOA000.60 4AGIL002.39 4AROA158.22 4AROA163.76 4AROA167.34 4AROA175.63 4AROA180.21 4AROA183.64 4AROA192.94 4AROA196.05 4AWTH000.40 9-NEW087.14 9-NEW089.34 9-NEW092.66 9-NEW098.32 9-PKC000.00 9-PKC004.16", " "))
 
 # These stations show the largest increasing or decreasing trends in CHLa (some not included as already in above vectors).
@@ -38,8 +40,12 @@ chlaTrends_stations <- c("4AROA038.49", "8-NAR047.69", "8-NAR054.17", "9-PKC004.
 # These stations show the largest increasing or decreasing trends in Secchi (some not included as already in above vectors).
 secchiTrends_stations <- c("1BCRO009.19", "4ASRE046.90")
 
+
+# Group sites into vectors for use in loops throughout script
 stations_of_interest_10yrs <- c(secchi_stations2, chlaTrends_stations, secchiTrends_stations)
 all33_stations <- c(secchi_stations1, secchi_stations2, chlaTrends_stations, secchiTrends_stations)
+
+# --------------------------
 
 # Lake Anna stations
 ## These stations are not included in the 33 stations of interest. They are from the subsequent LACA data set that was obtained after originally identifying SoI and generating the time series plots.
@@ -50,7 +56,9 @@ laca.stations <- laca.stations[laca.stations %in% unique(data$STATION_ID)]  # So
 updated.SoI <- unique(c(stations_of_interest_10yrs, laca.stations)) # all stations of interest MINUS 5 secchi only stations
 updated.SOI_COMPLETE <- unique(c(all33_stations, laca.stations)) # all stations of interest
 
-# Subset data to only include stations where multiple variables are of interest. Secchi-only station data can be drawn from the original `data` variable
+# -----------------------------
+# Subset data to only include stations where multiple variables are of interest. 
+# Secchi-only station data can be drawn from the original `data` variable
 data.sbst <- data %>% 
   filter(STATION_ID %in% updated.SoI) %>%
   select(-PHOSPHORUS_ORTHO, -TURBIDITY_HACH, TURBIDITY_NTU, AMMONIA_TOTAL, NITRATE_TOTAL)
