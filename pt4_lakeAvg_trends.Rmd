@@ -1,0 +1,196 @@
+---
+title: "Lake Average Trends"
+output: html_document
+---
+
+This file derives model trends for four lakes - Claytor, Anna, Kerr and SML - using average values across all stations within each lake. 
+
+Steps:
+
+    derive the May-Oct average values for each station by year, 
+    average these across stations within each year
+    run a mblm on the lake average values
+    generate output csv with results
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+# Prepare Data
+
+```{r, message = FALSE}
+# Load the data
+data <- read_csv("Data/processed_dataset.csv")
+stations.df <- read_csv("Data/lakeAvgStations_list.csv")
+stations <- unique(stations.df$STATION_ID)
+lakes <- unique(stations.df$Lake)
+
+# Subset data to include only relevant stations
+data.sub <- data %>% 
+  filter(STATION_ID %in% stations.df$STATION_ID) %>%
+  left_join(stations.df, by = "STATION_ID")
+
+# Define vector for looping through variables
+vars <- c("CHLa", "PHOSPHORUS_TOTAL", "NITROGEN_TOTAL", "DIN", "TSS", "SECCHI_DEPTH")
+
+
+
+```
+
+# Derive May-Oct Averages
+
+```{r, message = FALSE}
+stationAvgs <- list()
+
+## Resulting list structure:
+## list[[station]]$variable  variable = df with Year, STATION_ID, MAY_OCT_AVG
+for (station in stations) {
+  
+  station_avgs <- list()
+  
+  for (variable in vars) {
+    # Filter for current station and include only non-NA values of current var
+    data_station_variable <- data.sub %>%
+      filter(STATION_ID == station) %>%
+      filter(!is.na(!!sym(variable))) # dynamically reference the variable
+
+    # Confirm at least 10 yrs of data
+    if (length(unique(data_station_variable$Year)) >= 10) {
+      # Determine which years have at least 3 obs/yr
+      years_with_3_obs <- data_station_variable %>%
+        group_by(Year) %>%
+        summarise(n = sum(!is.na(!!sym(variable)))) %>%
+        filter(n >= 3)
+
+      if (nrow(years_with_3_obs) >= 10) {
+        # Calculate May-Oct average for the current station and variable
+        the_averages <- data_station_variable %>%
+          filter(Year %in% years_with_3_obs$Year) %>% # Only include years with >= 3 obs
+          group_by(Year, STATION_ID) %>%
+          summarise(MAY_OCT_AVG = mean(!!sym(variable), na.rm = TRUE),
+                    Lake = first(Lake))
+
+        # Add the May-Oct average for variable to the station_avgs list
+        station_avgs[[variable]] <- the_averages
+      }
+    }
+  }
+  
+  # Only add station to the final list if it has valid averages for at least one variable
+  if (length(station_avgs) > 0) {
+    stationAvgs[[station]] <- station_avgs
+  }
+}
+
+# Simplify the list structure
+bound_averages <- list()
+for (station in stations) {
+  bound <- bind_rows(stationAvgs[[station]], .id = "variable")
+  bound_averages[[station]] <- bound
+}
+
+# Combine all station averages into one dataframe
+mayOctAvgs_df <- bind_rows(bound_averages)
+
+```
+
+# Derive Averages by Lake
+
+```{r}
+lakeAvgs <- mayOctAvgs_df %>%
+  group_by(Lake, Year, variable) %>%
+  summarize(LakeAvg = mean(MAY_OCT_AVG, na.rm = TRUE)) %>%
+  ungroup()
+
+```
+# MBLM Trends
+
+### Custom function to derive trends
+
+```{r, warning = FALSE}
+trends_func <- function(lake, var) {
+  
+  modelSummary <- list()  
+  
+  df <- lakeAvgs %>%
+    filter(Lake == lake, variable == var)
+  
+  # Remove NA values -- there should not be any, but just in case.
+  df <- df %>%
+    filter(!is.na(LakeAvg)) %>%
+    ungroup()
+  
+  # Run mblm model
+  model <- mblm::mblm(LakeAvg ~ Year, data = df)
+  mod.sum <- mblm::summary.mblm(model)
+          
+  # Store results (directly, without creating the combined station-variable name)
+  modelSummary <- list(
+    slope = mod.sum$coefficients[2, 1],
+    MAD = mod.sum$coefficients["Year", "MAD"],
+    pvalue = mod.sum$coefficients["Year", 4],
+    intercept = mod.sum$coefficients[1, 1]
+  )
+  
+  return(modelSummary)  # Return the results
+}
+
+# ------- Run custom function in for loop -------
+## list[[station]]$variable  variable = list with slope, MAD, pval, intercept
+
+# Trends for each lake by variable
+trends_results <- list()
+
+for (l in lakes) {
+  lake_vars <- unique(lakeAvgs[lakeAvgs$Lake == l,]$variable)
+  
+  for (variable in lake_vars) {
+      trends_results[[l]][[variable]] <- trends_func(l, variable)
+  }
+}
+
+
+
+```
+
+
+### Extract Regression Statistics into single table
+
+```{r `regression stats`}
+regression_statistics <- list()
+
+for (lake in names(trends_results)) {
+      
+  modelSums <- trends_results[[lake]]
+  
+      reg.df <- data.frame(Lake = lake,
+                           variable = vars[vars %in% unique(lakeAvgs[lakeAvgs$Lake == lake,]$variable)],
+               model_slope = rep(NA, length(trends_results[[lake]])),
+               model_MAD = rep(NA, length(trends_results[[lake]])),
+               model_pval = rep(NA, length(trends_results[[lake]])),
+               model_intercept = rep(NA, length(trends_results[[lake]]))
+      )
+      
+  for (i in seq_along(trends_results[[lake]])) {
+      
+        p <- modelSums[[i]]
+      
+        reg.df$model_slope[i] <-  p$slope
+        reg.df$model_MAD[i] <-  p$MAD
+        reg.df$model_pval[i] <-  p$pvalue
+        reg.df$model_intercept[i] <-  p$intercept
+      }
+      
+      regression_statistics[[lake]] <- reg.df
+}
+  
+
+# ------- Create data frames from lists -------
+lakeAvgs_regressionStats <- bind_rows(regression_statistics) 
+
+write_csv(lakeAvgs_regressionStats, "data/lakeAverage_regressionStats.csv")
+
+```
+
+

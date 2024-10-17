@@ -26,13 +26,21 @@ From Paul: "I have come up with a list of 33 stations (below) for which I would 
 ### Vectorize the station IDs
 
 ```{r}
+#These stations have the longest record of Secchi data (since 1980), but were not included among trend sites.
 secchi_stations1 <- unlist(strsplit("2-APP020.23 2-LCN000.20 2-PKC001.84 2-SPE000.17 4ACRR008.32", " "))
+
+#These stations have the best long-term records for Secchi with >25 years of data since ~1995.  These sites also have good records for CHLa, TN, TP, and in some cases, TSS.
 secchi_stations2 <- unlist(strsplit("4ABSA000.62 4ABWR002.50 4ABWR010.55 4ABWR017.42 4ACCK001.80 4ACOA000.60 4AGIL002.39 4AROA158.22 4AROA163.76 4AROA167.34 4AROA175.63 4AROA180.21 4AROA183.64 4AROA192.94 4AROA196.05 4AWTH000.40 9-NEW087.14 9-NEW089.34 9-NEW092.66 9-NEW098.32 9-PKC000.00 9-PKC004.16", " "))
+
+# These stations show the largest increasing or decreasing trends in CHLa (some not included as already in above vectors).
 chlaTrends_stations <- c("4AROA038.49", "8-NAR047.69", "8-NAR054.17", "9-PKC004.16")
+
+# These stations show the largest increasing or decreasing trends in Secchi (some not included as already in above vectors).
 secchiTrends_stations <- c("1BCRO009.19", "4ASRE046.90")
 
 stations_of_interest_10yrs <- c(secchi_stations2, chlaTrends_stations, secchiTrends_stations)
 all33_stations <- c(secchi_stations1, secchi_stations2, chlaTrends_stations, secchiTrends_stations)
+
 # Lake Anna stations
 ## These stations are not included in the 33 stations of interest. They are from the subsequent LACA data set that was obtained after originally identifying SoI and generating the time series plots.
 laca.data <- openxlsx::read.xlsx("Data/Lake Anna Suppl.xlsx", sheet = 2)
@@ -42,7 +50,7 @@ laca.stations <- laca.stations[laca.stations %in% unique(data$STATION_ID)]  # So
 updated.SoI <- unique(c(stations_of_interest_10yrs, laca.stations)) # all stations of interest MINUS 5 secchi only stations
 updated.SOI_COMPLETE <- unique(c(all33_stations, laca.stations)) # all stations of interest
 
-# Subset data to only include these stations
+# Subset data to only include stations where multiple variables are of interest. Secchi-only station data can be drawn from the original `data` variable
 data.sbst <- data %>% 
   filter(STATION_ID %in% updated.SoI) %>%
   select(-PHOSPHORUS_ORTHO, -TURBIDITY_HACH, TURBIDITY_NTU, AMMONIA_TOTAL, NITRATE_TOTAL)
@@ -58,7 +66,8 @@ Yearly means for each variable at each station iff that variable has >= 10 years
 # loop through each station
 # loop through each variable and determine if there are at least 10 unique years of data, and if so, determine for how many of those years there are at least 3 observations per year
 
-vars <- c("CHLa", "SECCHI_DEPTH", "NITROGEN_TOTAL", "DIN", "PHOSPHORUS_TOTAL", "TSS")
+# This vector and its specific order is important throughout this file; it is used to loop through the variables in the correct order
+vars <- c("CHLa", "PHOSPHORUS_TOTAL", "NITROGEN_TOTAL", "DIN", "TSS", "SECCHI_DEPTH")
 
 stationAvgs_10yrs <- list()
 
@@ -212,14 +221,14 @@ for (station in names(trends_results)) {
         reg.df$model_intercept[i] <-  p$intercept
       }
       
-      regression_statistics[[paste(station)]] <- reg.df
+      regression_statistics[[station]] <- reg.df
 }
   
 
 # ------- Create data frames from lists -------
 regressions_df <- bind_rows(regression_statistics) 
 
-write_csv(regressions_df, "data/longTerm_Annual_Regression_Statistics.csv")
+# write_csv(regressions_df, "data/longTerm_Annual_Regression_Statistics.csv")
 
 ```
 
@@ -322,7 +331,7 @@ save(all_plots_list, file = "all_plots_list.RData")
 
 ```
 
-
+# -----------------------------------------------------------------------------
 
 # Regressions for All Stations-Variables
 
@@ -330,7 +339,7 @@ After completing the above workflow, Paul requested that I generate a file with 
 
 ```{r}
 # This file contains a column with the number of years of observations. 
-metadata <- read_csv("Data/updated_metadata.csv")
+metadata <- read_csv("Data/station_metadata.csv")
 
 ```
 
@@ -347,12 +356,12 @@ subset_variable_data <- function(metadata_column, threshold = 10) {
 
 # Create the subset_data list using the function
 subset_data <- list(
-  SECCHI_DEPTH = subset_variable_data("nYears_Secchi"),   
-  CHLa = subset_variable_data("nYears_CHLA"),           
+  CHLa = subset_variable_data("nYears_CHLA"),
+  PHOSPHORUS_TOTAL = subset_variable_data("nYears_totPhosphorus"),
   NITROGEN_TOTAL = subset_variable_data("nYears_totNitrogen"), 
-  PHOSPHORUS_TOTAL = subset_variable_data("nYears_totPhosphorus"), 
-  TSS = subset_variable_data("nYears_TSS"),
-  DIN = subset_variable_data("nYears_DIN")
+  DIN = subset_variable_data("nYears_DIN"),
+  SECCHI_DEPTH = subset_variable_data("nYears_Secchi"),   
+  TSS = subset_variable_data("nYears_TSS")
 )
 
 # Derive May-Oct Means for each year by station-variable
@@ -378,7 +387,7 @@ Each station is stored as a list in `stationAvgs`. This list has a different str
 #### Custom function to derive trends
 
 ```{r, warning = FALSE}
-trends_func <- function(variable) {
+trends_func2 <- function(variable) {
   
   modelSummaries <- list()  
   
@@ -413,10 +422,10 @@ trends_func <- function(variable) {
 # ------- Run custom function in for loop -------
 
 # Trends for all stations/variables with 10+ yr and 3+ obs/yr
-trends_results <- list()
+trends_results2 <- list()
 
   for (variable in vars) {
-  trends_results[[variable]] <- trends_func(variable)
+  trends_results2[[variable]] <- trends_func2(variable)
   }
 
 
@@ -457,7 +466,436 @@ for (variable in names(trends_results)) {
 regStats_allStations_df <- bind_rows(regStats_allStations) %>%
   arrange(STATION_ID)
 
-write_csv(regStats_allStations_df, "data/longTerm_Annual_Regression_Statistics_ALLSTATIONS.csv")
+# write_csv(regStats_allStations_df, "data/longTerm_Annual_Regression_Statistics_ALLSTATIONS.csv")
 
 ```
 
+# ------------------------------------------------------------------------------
+
+
+# Potential Publication Plots
+
+"From among the station time series you plotted, I picked out 4 that I might want to use later as examples of trends.  I would like to get a version of these as high resolution jpegs.  For all of these, please include the y axis titles and make sure the y axis starts at zero.  Within each figure (station) I would like all the plots to have the same x axis range.  Lastly, please format the p values as follows: if p > 0.05, display as 0.xx, if p < 0.05 then display as 0.xxx, unless p <0.001, then display as p < 0.001.
+
+The 4 stations are:
+
+```
+a. 4-ABWR010.55: a 2x3 figure with CHLa & TP at the top, TN and DIN in the middle, and TSS and Secchi at the bottom.
+b. 9-PKC000.00 (as above)
+c. 4-AROA192.94 (as above, but remove DIN and TSS outliers and re-run model).
+d. 4-ASRE046.90 (as above but without DIN and TSS)."
+```
+All of these stations are included in the original 33 stations of interest, and so the original `regressions_adjusted` data frame can be used to create the plots. 
+
+Station 4-AROA192.94 requires some additional data cleaning to remove outliers from the DIN and TSS variables.
+
+Because there are only 4 stations, this can just be done manually to meet the individual specifications of each plot, rather than automating with a loop.
+
+```{r}
+# `cowplot` package for use in arranging the plots into single figures
+library(cowplot)
+
+```
+
+Additional fields can be added to the data frame to facilitate the plotting process. This includes a field for defining p-val rendering and a field for y axis labeling.
+
+```{r}
+regressions_adjusted <- regressions_adjusted %>%
+  mutate(pval_render = case_when(
+    model_pval > 0.05 ~ paste0("p = ", formatC(model_pval, digits = 2, format = "f")),
+    model_pval < 0.05 & model_pval >= 0.001 ~ paste0("p = ", formatC(model_pval, digits = 3, format = "f")),
+    model_pval < 0.001 ~ "p < 0.001"
+  ),
+  y_label = case_when(
+    variable == "CHLa" ~ "CHLa (\u03BCg L\u207B\u00B9)",
+    variable == "PHOSPHORUS_TOTAL" ~ "TP (mg L\u207B\u00B9)",
+    variable == "NITROGEN_TOTAL" ~ "TN (mg L\u207B\u00B9)",
+    variable == "TSS" ~ "TSS (mg L\u207B\u00B9)",
+    variable == "SECCHI_DEPTH" ~ "Secchi Depth (m)",
+    variable == "DIN" ~ "DIN (mg L\u207B\u00B9)"
+  ))
+
+```
+
+
+### a. 4-ABWR010.55
+
+```{r, fig.width=6.5, fig.height=7}
+station <- "4ABWR010.55"
+data_a <- regressions_adjusted %>%
+  filter(STATION_ID == "4ABWR010.55")
+
+# List to hold the plots for this station
+station_a <- list()
+
+# Set a standard x-axis range across all plots (adjust as per data)
+min_year <- 1980
+max_year <- 2025  # Set the max year based on your data
+
+
+# ! ---- Plot Generation ----- ! #
+for (current_var in data_a$variable)  {
+  df_avgs <- yearlyAvgs_complete[[station]][[current_var]]
+  df_reg <- data_a %>%
+    filter(variable == current_var, STATION_ID == station)
+  
+  # Extract the y_label for the current variable
+  current_y_label <- df_reg$y_label[1]
+  # max y value for dynamic range -- needed, since the ylim needs to be set at 0 on the low end
+  max_y <- max(df_avgs$MAY_OCT_AVG, na.rm = TRUE) * 1.2
+  
+  # Calculate position for p-value: place it dynamically near the upper right, clear of the data points
+  pval_x_pos <- max(df_avgs$Year) - 5  # Adjust the 5 to change how far left from the max Year
+  pval_y_pos <- max_y * 0.95           # Place it slightly below the upper limit of the y-axis
+  
+  var_plot <- ggplot(df_avgs, aes(x = Year, y = MAY_OCT_AVG)) +
+    geom_point() +
+      # Add p-value inside the plot, positioning dynamically
+      annotate("text", x = pval_x_pos, y = pval_y_pos, 
+               label = df_reg$pval_render, size = 3.2, hjust = 1) +
+      # Regression line
+      annotate("segment", x = min(df_avgs$Year), 
+               xend = max(df_avgs$Year), 
+               y = df_reg$adjusted_intercept, 
+               yend = df_reg$adjusted_intercept + df_reg$model_slope * (max(df_avgs$Year) - min(df_avgs$Year)),
+               color = "red", linewidth = .42, alpha = .6) +
+      labs(title = NULL,
+           x = "Year", y = current_y_label) +  # Use the extracted y_label
+      scale_y_continuous(limits = c(0, max_y), labels = function(y) ifelse(y == 0, "0", format(y, digits = 1, nsmall = 0))) +
+      # Set x-axis limits to be consistent
+      scale_x_continuous(limits = c(min_year, max_year)) +
+      theme_minimal() +
+      # Make x and y axes black without adding a border around the entire plot
+      theme(
+        axis.line = element_line(color = "black"),  # Make x and y axes black
+        axis.title = element_text(size = 9.5),        # Adjust axis title size if needed
+        axis.text = element_text(size = 7.5, color = "black"),         # Adjust axis text size
+        plot.subtitle = element_text(size = 9),     # Adjust subtitle size
+        plot.margin = unit(c(.5, .5, .5, .5), "cm")
+      )
+  
+  station_a[[current_var]] <- var_plot
+}
+
+  
+  plot_4ABWR010.55 <- plot_grid(plotlist = station_a, ncol = 2,
+                              vjust = 4)
+  print(plot_4ABWR010.55)
+  
+  ggsave("plot_4ABWR010.55.jpg", width = 6.5, height = 7, units = "in", dpi = 1000)
+
+```
+
+### b. 9-PKC000.00
+
+```{r, fig.width=6.5, fig.height=7}
+station <- "9-PKC000.00"
+data_b <- regressions_adjusted %>%
+  filter(STATION_ID == station)
+
+# List to hold the plots for this station
+station_b <- list()
+
+# Set a standard x-axis range across all plots (adjust as per data)
+min_year <- 1980
+max_year <- 2024  # Set the max year based on your data
+
+
+# ! ---- Plot Generation ----- ! #
+for (current_var in data_b$variable)  {
+  df_avgs <- yearlyAvgs_complete[[station]][[current_var]]
+  df_reg <- data_b %>%
+    filter(variable == current_var, STATION_ID == station)
+  
+  # Extract the y_label for the current variable
+  current_y_label <- df_reg$y_label[1]
+  # max y value for dynamic range -- needed, since the ylim needs to be set at 0 on the low end
+  max_y <- if (current_var == "CHLa") {
+    15
+  } else if (current_var == "PHOSPHORUS_TOTAL") {
+    0.105 
+  } else {
+    max(df_avgs$MAY_OCT_AVG, na.rm = TRUE) * 1.2
+  }
+  
+  # Calculate position for p-value: place it dynamically near the upper right, clear of the data points
+  pval_x_pos <- max(df_avgs$Year) - 5  # Adjust the 5 to change how far left from the max Year
+  pval_y_pos <- max_y * 0.95           # Place it slightly below the upper limit of the y-axis
+  
+  var_plot <- ggplot(df_avgs, aes(x = Year, y = MAY_OCT_AVG)) +
+    geom_point() +
+      # Add p-value inside the plot, positioning dynamically
+      annotate("text", x = pval_x_pos, y = pval_y_pos, 
+               label = df_reg$pval_render, size = 3.2, hjust = 1) +
+      # Regression line
+      annotate("segment", x = min(df_avgs$Year), 
+               xend = max(df_avgs$Year), 
+               y = df_reg$adjusted_intercept, 
+               yend = df_reg$adjusted_intercept + df_reg$model_slope * (max(df_avgs$Year) - min(df_avgs$Year)),
+               color = "red", linewidth = .42, alpha = .6) +
+      labs(title = NULL,
+           x = "Year", y = current_y_label) +  # Use the extracted y_label
+      scale_y_continuous(limits = c(0, max_y), labels = function(y) ifelse(y == 0, "0", format(y, digits = 1, nsmall = 0))) +
+      # Set x-axis limits to be consistent
+      scale_x_continuous(limits = c(min_year, max_year)) +
+      theme_minimal() +
+      # Make x and y axes black without adding a border around the entire plot
+      theme(
+        axis.line = element_line(color = "black"),  # Make x and y axes black
+        axis.title = element_text(size = 9.5),        # Adjust axis title size if needed
+        axis.text = element_text(size = 7.5, color = "black"),         # Adjust axis text size
+        plot.subtitle = element_text(size = 9),     # Adjust subtitle size
+        plot.margin = unit(c(.5, .5, .5, .5), "cm")
+      )
+  
+  station_b[[current_var]] <- var_plot
+}
+
+  
+  plot_9PKC000.00 <- plot_grid(plotlist = station_b, ncol = 2,
+                              vjust = 4)
+  print(plot_9PKC000.00)
+  
+  ggsave("plot_9PKC000.00.jpg", width = 6.5, height = 7, units = "in", dpi = 1000)
+
+```
+
+### c. 4-AROA192.94 
+
+Outliers for DIN and TSS must be removed from yearly May-Oct averages, and MBLM models re-run. There is 1 outlier in each data set.
+
+#### Data prep
+```{r}
+station <- "4AROA192.94"
+
+stationData_DIN <- yearlyAvgs_complete[[station]][["DIN"]]
+stationData_TSS <- yearlyAvgs_complete[[station]][["TSS"]]
+
+boxplot(stationData_DIN$MAY_OCT_AVG, main = "DIN", ylab = "DIN (mg L-1)")
+boxplot(stationData_TSS$MAY_OCT_AVG, main = "TSS", ylab = "TSS (mg L-1)")
+
+# Remove outliers and return outlier-free data to the yearlyAvgs_complete list, for use in plotting loops
+stationData_DIN <- stationData_DIN %>%
+  filter(Year != 1983)
+stationData_TSS <- stationData_TSS %>%
+  filter(Year != 1989)
+
+yearlyAvgs_complete[[station]][["DIN"]] <- stationData_DIN
+yearlyAvgs_complete[[station]][["TSS"]] <- stationData_TSS
+
+# Re-run MBLM regressions with outlier-free data (this uses the custom function )
+  ## Replace the existing results in the trends_results list with outlier-free results
+  trends_results[[station]]$DIN <- trends_func(station, "DIN")
+  trends_results[[station]]$TSS <- trends_func(station, "TSS")
+
+  ## Subset trend results for station 4-AROA192.94
+  station_trends_results <- trends_results[[station]]
+
+
+  ## Extract regression statistics into a single table
+  reg.df <- data.frame(STATION_ID = station,
+                       variable = vars[vars %in% names(station_trends_results)],
+                       model_slope = rep(NA, length(names(station_trends_results))),
+                       model_MAD = rep(NA, length(names(station_trends_results))),
+                       model_pval = rep(NA, length(names(station_trends_results))),
+                       model_intercept = rep(NA, length(names(station_trends_results)))
+                     )
+      
+    for (i in seq_along(names(station_trends_results))) {
+        
+          p <- station_trends_results[[i]]
+        
+          reg.df$model_slope[i] <-  p$slope
+          reg.df$model_MAD[i] <-  p$MAD
+          reg.df$model_pval[i] <-  p$pvalue
+          reg.df$model_intercept[i] <-  p$intercept
+        }
+
+  
+# Calculate adjusted model intercept based on the minimum year per variable -- this is the same as above, and really only needs to be recalculated for DIN, for whom the min year has changed from 1983 to 1984.
+## Change the min for DIN to 1984
+station_minYears <- minYear.df %>%
+  filter(STATION_ID == "4AROA192.94") %>%
+  mutate(minYear = ifelse(variable == "DIN", 1984, minYear))
+
+## Add adjsuted intercept, along with labeling and p-value rendering to the regression data frame
+reg_adjustedIntcpt <- reg.df %>%
+  left_join(station_minYears, by = c("STATION_ID", "variable")) %>%
+  mutate(adjusted_intercept = model_intercept + model_slope * minYear) %>%
+  mutate(pval_render = case_when(
+    model_pval > 0.05 ~ paste0("p = ", formatC(model_pval, digits = 2, format = "f")),
+    model_pval < 0.05 & model_pval >= 0.001 ~ paste0("p = ", formatC(model_pval, digits = 3, format = "f")),
+    model_pval < 0.001 ~ "p < 0.001"
+  ),
+  y_label = case_when(
+    variable == "CHLa" ~ "CHLa (\u03BCg L\u207B\u00B9)",
+    variable == "PHOSPHORUS_TOTAL" ~ "TP (mg L\u207B\u00B9)",
+    variable == "NITROGEN_TOTAL" ~ "TN (mg L\u207B\u00B9)",
+    variable == "TSS" ~ "TSS (mg L\u207B\u00B9)",
+    variable == "SECCHI_DEPTH" ~ "Secchi Depth (m)",
+    variable == "DIN" ~ "DIN (mg L\u207B\u00B9)"
+  ))
+
+```
+
+#### Plot generation
+
+```{r, fig.width=6.5, fig.height=7}
+# List to hold the plots for this station
+station_c <- list()
+
+# Set a standard x-axis range across all plots (adjust as per data)
+min_year <- 1983
+max_year <- 2024  # Set the max year based on your data
+
+
+# ! ---- Plot Generation ----- ! #
+for (current_var in reg_adjustedIntcpt$variable)  {
+  df_avgs <- yearlyAvgs_complete[[station]][[current_var]]
+  df_reg <- reg_adjustedIntcpt %>%
+    filter(variable == current_var)
+  
+  # Extract the y_label for the current variable
+  current_y_label <- df_reg$y_label[1]
+  # max y value for dynamic range -- needed, since the ylim needs to be set at 0 on the low end
+   max_y <- if (current_var == "CHLa") {
+      30
+    } else {
+      max(df_avgs$MAY_OCT_AVG, na.rm = TRUE) * 1.2
+    }
+    
+   print(paste("Current variable:", current_var, "Max Y:", max_y))
+   
+  # Calculate position for p-value: place it dynamically near the upper right, clear of the data points
+  pval_x_pos <- max(df_avgs$Year) - 5  # Adjust the 5 to change how far left from the max Year
+  pval_y_pos <- max_y * 0.95           # Place it slightly below the upper limit of the y-axis
+  
+  var_plot <- ggplot(df_avgs, aes(x = Year, y = MAY_OCT_AVG)) +
+    geom_point() +
+      # Add p-value inside the plot, positioning dynamically
+      annotate("text", x = pval_x_pos, y = pval_y_pos, 
+               label = df_reg$pval_render, size = 3.2, hjust = 1) +
+      # Regression line
+      annotate("segment", x = min(df_avgs$Year), 
+               xend = max(df_avgs$Year), 
+               y = df_reg$adjusted_intercept, 
+               yend = df_reg$adjusted_intercept + df_reg$model_slope * (max(df_avgs$Year) - min(df_avgs$Year)),
+               color = "red", linewidth = .42, alpha = .6) +
+      labs(title = NULL,
+           x = "Year", y = current_y_label) +  # Use the extracted y_label
+      scale_y_continuous(limits = c(0, max_y), labels = function(y) ifelse(y == 0, "0", format(y, digits = 1, nsmall = 0))) +
+      # Set x-axis limits to be consistent
+      scale_x_continuous(limits = c(min_year, max_year)) +
+      theme_minimal() +
+      # Make x and y axes black without adding a border around the entire plot
+      theme(
+        axis.line = element_line(color = "black"),  # Make x and y axes black
+        axis.title = element_text(size = 9.5),        # Adjust axis title size if needed
+        axis.text = element_text(size = 7.5, color = "black"),         # Adjust axis text size
+        plot.subtitle = element_text(size = 9),     # Adjust subtitle size
+        plot.margin = unit(c(.5, .5, .5, .5), "cm")
+      )
+  
+  station_c[[current_var]] <- var_plot
+}
+
+  
+  plot_4AROA192.94 <- plot_grid(plotlist = station_c, ncol = 2,
+                              vjust = 4)
+  print(plot_4AROA192.94)
+  
+  ggsave("plot_4AROA192.94.jpg", width = 6.5, height = 7, units = "in", dpi = 1000)
+
+```
+
+### d. 4-ASRE046.90
+
+This figure should include only 4 plots, with DIN and TSS excluded.
+
+```{r, fig.width=6.5, fig.height=4.667}
+station <- "4ASRE046.90"
+data_d <- regressions_adjusted %>%
+  filter(STATION_ID == station) %>%
+  filter(variable != "DIN" & variable != "TSS")
+
+# List to hold the plots for this station
+station_d <- list()
+
+# Set a standard x-axis range across all plots (adjust as per data)
+min_year <- 1980
+max_year <- 2024  # Set the max year based on your data
+
+
+# ! ---- Plot Generation ----- ! #
+for (current_var in data_d$variable)  {
+  df_avgs <- yearlyAvgs_complete[[station]][[current_var]]
+  df_reg <- data_d %>%
+    filter(variable == current_var, STATION_ID == station)
+  
+  # Extract the y_label for the current variable
+  current_y_label <- df_reg$y_label[1]
+  # max y value for dynamic range -- needed, since the ylim needs to be set at 0 on the low end
+  max_y <- max(df_avgs$MAY_OCT_AVG, na.rm = TRUE) * 1.07
+
+  
+  # Calculate position for p-value: place it dynamically near the upper right, clear of the data points
+  pval_x_pos <- if (current_var == "PHOSPHORUS_TOTAL") {
+    max(df_avgs$Year) - 18.5
+    } else {
+      max(df_avgs$Year) - 10
+    }
+      
+  pval_y_pos <- if (current_var == "PHOSPHORUS_TOTAL") {
+    .023
+    } else if (current_var == "NITROGEN_TOTAL") {
+      .345
+    } else if (current_var == "CHLa") {
+      2.5
+    } else {
+      max_y * 0.95
+    }         
+  
+  var_plot <- ggplot(df_avgs, aes(x = Year, y = MAY_OCT_AVG)) +
+    geom_point() +
+      # Add p-value inside the plot, positioning dynamically
+      annotate("text", x = pval_x_pos, y = pval_y_pos, 
+               label = df_reg$pval_render, size = 3.2, hjust = 1) +
+      # Regression line
+      annotate("segment", x = min(df_avgs$Year), 
+               xend = max(df_avgs$Year), 
+               y = df_reg$adjusted_intercept, 
+               yend = df_reg$adjusted_intercept + df_reg$model_slope * (max(df_avgs$Year) - min(df_avgs$Year)),
+               color = "red", linewidth = .42, alpha = .6) +
+      labs(title = NULL,
+           x = "Year", y = current_y_label) +  # Use the extracted y_label
+      scale_y_continuous(limits = c(0, max_y), labels = function(y) ifelse(y == 0, "0", format(y, digits = 1, nsmall = 0))) +
+      # Set x-axis limits to be consistent
+      scale_x_continuous(limits = c(min_year, max_year)) +
+      theme_minimal() +
+      # Make x and y axes black without adding a border around the entire plot
+      theme(
+        axis.line = element_line(color = "black"),  # Make x and y axes black
+        axis.title = element_text(size = 9.5),        # Adjust axis title size if needed
+        axis.text = element_text(size = 7.5, color = "black"),         # Adjust axis text size
+        plot.subtitle = element_text(size = 9),     # Adjust subtitle size
+        plot.margin = unit(c(.5, .5, .5, .5), "cm")
+      )
+  
+  station_d[[current_var]] <- var_plot
+}
+
+  
+  plot_4ASRE046.90 <- plot_grid(plotlist = station_d, ncol = 2,
+                              vjust = 4)
+  print(plot_4ASRE046.90)
+  
+  ggsave("plot_4ASRE046.90.jpg", width = 6.5, height = 4.667, units = "in", dpi = 1000)
+  
+  
+  d <- bind_rows(yearlyAvgs_complete[[station]], .id = "variable")
+  
+  d %>%
+    group_by(variable) %>%
+    summarise(range = range(MAY_OCT_AVG, na.rm = TRUE))
+
+```
