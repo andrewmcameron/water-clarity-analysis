@@ -1,5 +1,5 @@
 ---
-title: "Reservoir Water Clarity: Station-Level Trend Analysis"
+title: "Reservoir Water Clarity: Station-Level Monthly Trend Analysis"
 author: "Andrew Cameron"
 date: "2024-09-10"
 output: html_document
@@ -787,7 +787,7 @@ for (i in seq_along(Monthly_Summary_Statistics)){
 
 regressions_df <- bind_rows(regression_statistics, .id = "Variable")
 
-write_csv(regressions_df, "data/Regression_Statistics.csv")
+write_csv(regressions_df, "data/monthly_RegressionStatistics.csv")
 
 ```
 

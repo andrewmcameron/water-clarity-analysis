@@ -15,7 +15,7 @@ library(tidyverse)
 ```{r, message = FALSE}
 # Load the data
 data <- read_csv("data/processed_dataset.csv")
-trends <- read_csv("data/longTerm_Annual_Regression_Statistics_ALLSTATIONS.csv")
+trends <- read_csv("data/station_level_data/longTerm_Annual_Regression_Statistics_ALLSTATIONS.csv")
 # This file contains a column with the number of years of observations. 
 metadata <- read_csv("Data/station_metadata.csv")
 
@@ -266,7 +266,7 @@ p5 <- ggplot(subset(plot_df, variable == "NITROGEN_TOTAL")) +
   scale_y_continuous(limits = c(0, 2.5), breaks = c(0, 1, 2)) +
   scale_x_continuous(limits = c(1990, 2025), breaks = seq(1990, 2020, 10)) +
   theme_minimal() + 
-  labs(x = "Year", y = "Total N (mg N L\u207B\u00B9)") +  
+  labs(x = NULL, y = "Total N (mg N L\u207B\u00B9)") +  
   theme(legend.position = "none",
         panel.border = element_rect(colour = "black", fill=NA, size=.5),
         axis.title.y = element_text(size = 10.2), 
@@ -317,13 +317,13 @@ combined_plot <- (p1 | p2 | p3) /
 # Display the combined plot
 combined_plot
 
-ggsave("publication_plot.jpg", width = 7, height = 7, units = "in", dpi = 1000)
+ggsave("figures/stationLevelTrends_MayOctavg.jpg", width = 7, height = 7, units = "in", dpi = 1000)
 
 
 
 ```
 
-## fff
+## Summary Statistics for Plot Stations
 
 Produce a file that contains the long-term mean and median values for stations included in the plot, i.e., the average of the yearly May-Oct averages for Secchi, CHLa, TSS, TN, TP and DIN. 
 

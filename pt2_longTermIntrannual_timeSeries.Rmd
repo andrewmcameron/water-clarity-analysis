@@ -1,5 +1,5 @@
 ---
-title: "Reservoir Water Clarity: Long-Term Intrannual Trends"
+title: "Reservoir Water Clarity: Station-Level Long-Term Intrannual Trends"
 output: html_document
 toc: true  
 toc_float: true 
@@ -568,7 +568,7 @@ for (current_var in data_a$variable)  {
                yend = df_reg$adjusted_intercept + df_reg$model_slope * (max(df_avgs$Year) - min(df_avgs$Year)),
                color = "red", linewidth = .42, alpha = .6) +
       labs(title = NULL,
-           x = "Year", y = current_y_label) +  # Use the extracted y_label
+           x = NULL, y = current_y_label) +  # Use the extracted y_label
       scale_y_continuous(limits = c(0, max_y), labels = function(y) ifelse(y == 0, "0", format(y, digits = 1, nsmall = 0))) +
       # Set x-axis limits to be consistent
       scale_x_continuous(limits = c(min_year, max_year)) +
@@ -579,18 +579,17 @@ for (current_var in data_a$variable)  {
         axis.title = element_text(size = 9.5),        # Adjust axis title size if needed
         axis.text = element_text(size = 7.5, color = "black"),         # Adjust axis text size
         plot.subtitle = element_text(size = 9),     # Adjust subtitle size
-        plot.margin = unit(c(.5, .5, .5, .5), "cm")
+        plot.margin = unit(c(.2, .2, .2, .2), "cm")
       )
   
   station_a[[current_var]] <- var_plot
 }
 
   
-  plot_4ABWR010.55 <- plot_grid(plotlist = station_a, ncol = 2,
-                              vjust = 4)
+  plot_4ABWR010.55 <- plot_grid(plotlist = station_a, ncol = 2)
   print(plot_4ABWR010.55)
   
-  ggsave("plot_4ABWR010.55.jpg", width = 6.5, height = 7, units = "in", dpi = 1000)
+  ggsave("figures/plot_4ABWR010.55.jpg", width = 6.5, height = 7, units = "in", dpi = 1000)
 
 ```
 
@@ -642,7 +641,7 @@ for (current_var in data_b$variable)  {
                yend = df_reg$adjusted_intercept + df_reg$model_slope * (max(df_avgs$Year) - min(df_avgs$Year)),
                color = "red", linewidth = .42, alpha = .6) +
       labs(title = NULL,
-           x = "Year", y = current_y_label) +  # Use the extracted y_label
+           x = NULL, y = current_y_label) +  # Use the extracted y_label
       scale_y_continuous(limits = c(0, max_y), labels = function(y) ifelse(y == 0, "0", format(y, digits = 1, nsmall = 0))) +
       # Set x-axis limits to be consistent
       scale_x_continuous(limits = c(min_year, max_year)) +
@@ -653,18 +652,17 @@ for (current_var in data_b$variable)  {
         axis.title = element_text(size = 9.5),        # Adjust axis title size if needed
         axis.text = element_text(size = 7.5, color = "black"),         # Adjust axis text size
         plot.subtitle = element_text(size = 9),     # Adjust subtitle size
-        plot.margin = unit(c(.5, .5, .5, .5), "cm")
+        plot.margin = unit(c(.2, .2, .2, .2), "cm")
       )
   
   station_b[[current_var]] <- var_plot
 }
 
   
-  plot_9PKC000.00 <- plot_grid(plotlist = station_b, ncol = 2,
-                              vjust = 4)
+  plot_9PKC000.00 <- plot_grid(plotlist = station_b, ncol = 2)
   print(plot_9PKC000.00)
   
-  ggsave("plot_9PKC000.00.jpg", width = 6.5, height = 7, units = "in", dpi = 1000)
+  ggsave("figures/plot_9PKC000.00.jpg", width = 6.5, height = 7, units = "in", dpi = 1000)
 
 ```
 
@@ -673,6 +671,7 @@ for (current_var in data_b$variable)  {
 Outliers for DIN and TSS must be removed from yearly May-Oct averages, and MBLM models re-run. There is 1 outlier in each data set.
 
 #### Data prep
+
 ```{r}
 station <- "4AROA192.94"
 
@@ -682,7 +681,7 @@ stationData_TSS <- yearlyAvgs_complete[[station]][["TSS"]]
 boxplot(stationData_DIN$MAY_OCT_AVG, main = "DIN", ylab = "DIN (mg L-1)")
 boxplot(stationData_TSS$MAY_OCT_AVG, main = "TSS", ylab = "TSS (mg L-1)")
 
-# Remove outliers and return outlier-free data to the yearlyAvgs_complete list, for use in plotting loops
+# Remove outliers and reincorporate outlier-free data to the yearlyAvgs_complete list, for use in plotting loops
 stationData_DIN <- stationData_DIN %>%
   filter(Year != 1983)
 stationData_TSS <- stationData_TSS %>%
@@ -774,7 +773,7 @@ for (current_var in reg_adjustedIntcpt$variable)  {
     
    print(paste("Current variable:", current_var, "Max Y:", max_y))
    
-  # Calculate position for p-value: place it dynamically near the upper right, clear of the data points
+  # Set position for p-value: place it dynamically near the upper right, clear of the data points
   pval_x_pos <- max(df_avgs$Year) - 5  # Adjust the 5 to change how far left from the max Year
   pval_y_pos <- max_y * 0.95           # Place it slightly below the upper limit of the y-axis
   
@@ -790,7 +789,7 @@ for (current_var in reg_adjustedIntcpt$variable)  {
                yend = df_reg$adjusted_intercept + df_reg$model_slope * (max(df_avgs$Year) - min(df_avgs$Year)),
                color = "red", linewidth = .42, alpha = .6) +
       labs(title = NULL,
-           x = "Year", y = current_y_label) +  # Use the extracted y_label
+           x = NULL, y = current_y_label) +  # Use the extracted y_label
       scale_y_continuous(limits = c(0, max_y), labels = function(y) ifelse(y == 0, "0", format(y, digits = 1, nsmall = 0))) +
       # Set x-axis limits to be consistent
       scale_x_continuous(limits = c(min_year, max_year)) +
@@ -801,18 +800,17 @@ for (current_var in reg_adjustedIntcpt$variable)  {
         axis.title = element_text(size = 9.5),        # Adjust axis title size if needed
         axis.text = element_text(size = 7.5, color = "black"),         # Adjust axis text size
         plot.subtitle = element_text(size = 9),     # Adjust subtitle size
-        plot.margin = unit(c(.5, .5, .5, .5), "cm")
+        plot.margin = unit(c(.2, .2, .2, .2), "cm")
       )
   
   station_c[[current_var]] <- var_plot
 }
 
   
-  plot_4AROA192.94 <- plot_grid(plotlist = station_c, ncol = 2,
-                              vjust = 4)
+  plot_4AROA192.94 <- plot_grid(plotlist = station_c, ncol = 2)
   print(plot_4AROA192.94)
   
-  ggsave("plot_4AROA192.94.jpg", width = 6.5, height = 7, units = "in", dpi = 1000)
+  ggsave("figures/plot_4AROA192.94.jpg", width = 6.5, height = 7, units = "in", dpi = 1000)
 
 ```
 
@@ -846,7 +844,7 @@ for (current_var in data_d$variable)  {
   max_y <- max(df_avgs$MAY_OCT_AVG, na.rm = TRUE) * 1.07
 
   
-  # Calculate position for p-value: place it dynamically near the upper right, clear of the data points
+  # Set position for p-value
   pval_x_pos <- if (current_var == "PHOSPHORUS_TOTAL") {
     max(df_avgs$Year) - 18.5
     } else {
@@ -875,7 +873,7 @@ for (current_var in data_d$variable)  {
                yend = df_reg$adjusted_intercept + df_reg$model_slope * (max(df_avgs$Year) - min(df_avgs$Year)),
                color = "red", linewidth = .42, alpha = .6) +
       labs(title = NULL,
-           x = "Year", y = current_y_label) +  # Use the extracted y_label
+           x = NULL, y = current_y_label) +  # Use the extracted y_label
       scale_y_continuous(limits = c(0, max_y), labels = function(y) ifelse(y == 0, "0", format(y, digits = 1, nsmall = 0))) +
       # Set x-axis limits to be consistent
       scale_x_continuous(limits = c(min_year, max_year)) +
@@ -886,24 +884,42 @@ for (current_var in data_d$variable)  {
         axis.title = element_text(size = 9.5),        # Adjust axis title size if needed
         axis.text = element_text(size = 7.5, color = "black"),         # Adjust axis text size
         plot.subtitle = element_text(size = 9),     # Adjust subtitle size
-        plot.margin = unit(c(.5, .5, .5, .5), "cm")
+        plot.margin = unit(c(.2, .2, .2, .2), "cm")
       )
   
   station_d[[current_var]] <- var_plot
 }
 
   
-  plot_4ASRE046.90 <- plot_grid(plotlist = station_d, ncol = 2,
-                              vjust = 4)
+  plot_4ASRE046.90 <- plot_grid(plotlist = station_d, ncol = 2)
   print(plot_4ASRE046.90)
   
-  ggsave("plot_4ASRE046.90.jpg", width = 6.5, height = 4.667, units = "in", dpi = 1000)
-  
-  
-  d <- bind_rows(yearlyAvgs_complete[[station]], .id = "variable")
-  
-  d %>%
-    group_by(variable) %>%
-    summarise(range = range(MAY_OCT_AVG, na.rm = TRUE))
+  ggsave("figures/plot_4ASRE046.90.jpg", width = 6.5, height = 4.667, units = "in", dpi = 1000)
 
 ```
+
+### e. DIN Scatterplots 
+
+"Could you make a scatterplot of May-Oct mean DIN (x) vs May-Oct mean TN (y)?  Each data point would represent one station-year.  For most of our stations, the DIN data are pre-2000 and the TN data are post-2000 so I am not sure how many data points we will get, but I would like to show that most of the TN is in the form of DIN (i.e., the two should be correlated)."
+
+
+```{r}
+# Simplify the list containing yearly averages
+bound_averages <- list()
+for (station in updated.SOI_COMPLETE) {
+  bound <- bind_rows(yearlyAvgs_complete[[station]], .id = "variable")
+  bound_averages[[station]] <- bound
+}
+
+# Combine all station averages into one dataframe
+mayOctAvgs_df <- bind_rows(bound_averages)
+
+## Using only the 4 lakes of interest, there are a total of 7 data points available for the scatterplot where both DIN and TN are available.
+nitro_data <- yearlyAvgs_complete %>%
+  filter(variable == "DIN" | variable == "NITROGEN_TOTAL") %>%
+  pivot_wider(names_from = variable, values_from = MAY_OCT_AVG) %>%
+  filter(!is.na(DIN) & !is.na(NITROGEN_TOTAL))
+
+
+```
+

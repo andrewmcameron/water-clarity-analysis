@@ -1,5 +1,5 @@
 ---
-title: "Population Level Analysis"
+title: "Reservoir Water Clatity: Population Level Analysis"
 output: html_document
 date: "2024-10-09"
 ---
@@ -49,6 +49,22 @@ subset_data <- list(
   DIN = subset_variable_data("nYears_DIN")
 )
 
+# Remove outliers
+## DIN outlier from station 4AROA192.94
+din_data <- subset_data[["DIN"]]
+index <- which.max(din_data$DIN[din_data$STATION_ID == "4AROA192.94"])
+din_data$DIN[din_data$STATION_ID == "4AROA192.94"][index] <- NA
+subset_data[["DIN"]] <- din_data
+
+## CHLa outliers
+### station 2-XDD000.40 (value = 1148) and station 5ASRN000.66 (value = 11592)
+chla_data <- subset_data[["CHLa"]]
+index1 <- which.max(chla_data$CHLa[chla_data$STATION_ID == "2-XDD000.40"])
+index2 <- which.max(chla_data$CHLa[chla_data$STATION_ID == "5ASRN000.66"])
+chla_data$CHLa[chla_data$STATION_ID == "2-XDD000.40"][index1] <- NA
+chla_data$CHLa[chla_data$STATION_ID == "5ASRN000.66"][index2] <- NA
+subset_data[["CHLa"]] <- chla_data
+
 ```
 
 # Summary Statistics
@@ -83,7 +99,27 @@ for (var in names(subset_data)) {
 summary_df <- bind_rows(summary_list, .id = "variable") %>%
   relocate(variable, .after = "STATION_ID")
 
-write_csv(summary_df, "data/5y_summaryStats.csv")
+## "organize these data so that there is a single column of Station IDs followed by 4 columns each (min, mean, median, max) for CHLa, TN, TP, etc.
+## That way there is a single row per station containing all the statistics for the 6 variables"
+summary_df_wide <- summary_df %>%
+  pivot_wider(
+    names_from = variable,
+    values_from = c(min, mean, median, max),
+    names_glue = "{variable}_{.value}"
+  ) %>%
+  select(
+    STATION_ID,
+    matches("^CHLa_"), 
+    matches("^SECCHI_DEPTH_"), 
+    matches("^NITROGEN_TOTAL_"), 
+    matches("^PHOSPHORUS_TOTAL_"), 
+    matches("^TSS_"), 
+    matches("^DIN_")
+  )
+
+summary_df_wide
+
+write_csv(summary_df_wide, "data/5y_summaryStats_wide.csv")
 
 ```
 
@@ -203,7 +239,7 @@ library(ggplot2)
     labs(
       title = "Secchi Depth",
       subtitle = "No outliers excluded for visualization.",
-      x = "5-Year Interval",
+      x = NULL,
       y = "Depth (m)"
     ) +
     theme_minimal() +
@@ -228,7 +264,7 @@ library(ggplot2)
     labs(
       title = "Chlorophyll-A",
       subtitle = "CHLa values above 50 (n = 63) excluded for visualization purposes.",
-      x = "5-Year Interval",
+      x = NULL,
       y = "CHLa (\u03BCg L\u207B\u00B9)"
     ) +
     theme_minimal() +
@@ -256,7 +292,7 @@ library(ggplot2)
           labs(
             title = "Chlorophyll-A (log\u2081\u2080 transformed)",
             subtitle = "log\u2081\u2080(CHLa) values above 2 (n = 11) excluded for visualization purposes.",
-            x = "5-Year Interval",
+            x = NULL,
             y = "log\u2081\u2080(CHLa) (\u03BCg L\u207B\u00B9)"
           ) +
           theme_minimal() +
@@ -283,7 +319,7 @@ library(ggplot2)
     labs(
       title = "Total Nitrogen",
       subtitle = "TN values above 2 (n = 28) excluded for visualization purposes.",
-      x = "5-Year Interval",
+      x = NULL,
       y = "TN (mg N L\u207B\u00B9)"
   ) +
     theme_minimal() +
@@ -309,7 +345,7 @@ library(ggplot2)
     labs(
       title = "Total Phosphorus",
       subtitle = "TP values above .3 (n = 21) excluded for visualization purposes.",
-      x = "5-Year Interval",
+      x = NULL,
       y = "TP (mg N L\u207B\u00B9)"
   ) +
     theme_minimal() +
@@ -335,7 +371,7 @@ library(ggplot2)
     labs(
       title = "Total Suspened Solids",
       subtitle = "TSS values above 50 (n = 6) excluded for visualization purposes.",
-      x = "5-Year Interval",
+      x = NULL,
       y = "TSS (mg N L\u207B\u00B9)"
   ) +
     theme_minimal() +
@@ -348,4 +384,234 @@ library(ggplot2)
 
 ```
 
+# MBLM Trend Estimates
 
+"for the dataset that contains all the stations which have a min of 5 years of data, I would like to fit mblms to estimate the trend (slope) for CHLa, TN, TP, Sechi, TSS and DIN.  This is the same as what we did previously for individual stations, but now we are fitting a model for all the stations combined including those stations that met the 5 year min but not the 10 or 15 year min.  It would be helpful to see a plot of the data with the model."
+
+
+## Derive May-Oct averages
+
+Yearly means for each variable at each station where 5y or more of data (min 3 obs/yr). 
+
+```{r, message=FALSE}
+vars <- names(subset_data)
+
+# List to store station averages for each variable
+stationAvgs <- list()
+
+# Loop by variable, as `subset_data` is structured by variable
+for (var in vars) {
+  
+  # List to hold averages for the current variable
+  station_avgs_current_var <- list()
+  
+  var_df <- subset_data[[var]]
+  stations <- unique(df$STATION_ID)
+  
+  for (station in stations) {
+    # Filter for current station and include only non-NA values of current var
+    station_df <- var_df %>%
+      filter(STATION_ID == station) %>%
+      filter(!is.na(!!sym(var))) # dynamically reference the variable
+             
+    # Group observations by year and filter for only years with 3 or more obs
+    # This is redundant, as the processed dataset generated in pt1 file already filters for min 3 obs per station-year. But no harm in being extra cautious.
+      years_with_3_obs <- station_df %>%
+        group_by(Year) %>%
+        summarise(n = sum(!is.na(!!sym(var)))) %>%
+        filter(n >= 3)
+      
+        # Calculate May-Oct average for the current station and variable, filtering to only include years with 3+ obs
+        df_avg <- station_df %>%
+          filter(Year %in% years_with_3_obs$Year) %>% # Only include years with >= 3 obs
+          group_by(Year, STATION_ID) %>%
+          summarise(MAY_OCT_AVG = mean(!!sym(var), na.rm = TRUE))
+
+        # Add the May-Oct average for variable to the station_avgs list
+        station_avgs_current_var[[station]] <- df_avg
+  }
+  
+  # Only add station to the final list if it has valid averages for at least one variable
+  if (length(station_avgs_current_var) > 0) {
+    stationAvgs[[var]] <- station_avgs_current_var
+  }
+}
+
+# Create data frame to save and share with Paul
+avg_df_list <- list()
+
+for (var in vars) {
+  df <- bind_rows(stationAvgs[[var]])
+  avg_df_list[[var]] <- df
+}
+
+all_vars_avg_df <- bind_rows(avg_df_list, .id = "variable")
+
+write_csv(all_vars_avg_df, "data/population_level_data/population_avg_data.csv")
+
+```
+
+## MBLM Model Fitting
+
+```{r}
+# Variable order within station average list
+# [1] "SECCHI_DEPTH"     "CHLa"             "NITROGEN_TOTAL"  
+# [4] "PHOSPHORUS_TOTAL" "TSS"              "DIN"
+
+# Create function to loop through each variable and fit mblm
+mblm_func <- function(variable) {
+  
+  averages_list <- stationAvgs[[variable]]
+  # Bind into single data frame for use in mblm
+  df <- bind_rows(averages_list)
+  
+    # Run mblm model
+    model <- mblm::mblm(MAY_OCT_AVG ~ Year, data = df)
+    mod.sum <- mblm::summary.mblm(model)
+    
+    # Store results (directly, without creating the combined station-variable name)
+    modelSummary <- list(
+      slope = mod.sum$coefficients[2, 1],
+      MAD = mod.sum$coefficients["Year", "MAD"],
+      pvalue = mod.sum$coefficients["Year", 4],
+      intercept = mod.sum$coefficients[1, 1]
+    )
+    
+    modelSummaries <- modelSummary
+  
+  return(modelSummaries)
+}
+
+
+# ------- Run custom function in for loop -------
+
+# Store population-level trend estimates for each variable in list
+trends_results <- list()
+
+  for (var in vars) {
+  trends_results[[var]] <- mblm_func(var)
+  }
+
+
+```
+
+
+## Extract Regression Statistics
+
+```{r `regression stats`}
+regStats<- list()
+
+for (variable in names(trends_results)) {
+      
+  modelSums <- trends_results[[variable]]
+  
+      reg.df <- data.frame(variable = variable,
+               model_slope = NA,
+               model_MAD = NA,
+               model_pval = NA,
+               model_intercept = NA)
+      
+        p <- modelSums
+      
+        reg.df$model_slope <-  p$slope
+        reg.df$model_MAD <-  p$MAD
+        reg.df$model_pval <-  p$pvalue
+        reg.df$model_intercept <-  p$intercept
+      
+      regStats[[variable]] <- reg.df
+}
+  
+
+# ------- Create data frames from lists -------
+regStats_allVars <- bind_rows(regStats) 
+```
+
+### Visualize Models
+
+#### Adjusted model intercept
+
+Because the model intercept is based on x=0, and the x-axes are somewhere between 197X and 200x, I create an adjusted model intercept based on the following formula:
+
+`adjusted_intercept = model_intercept + model_slope * min(Year)`
+
+This requires first determining the minimum year for each variable at each station
+
+```{r}
+minYear <- list()
+
+for (var in vars) {
+  
+  df <- bind_rows(stationAvgs[[var]])
+  
+  # Initialize the data frame for storing minimum years
+  minYear.df <- data.frame(variable = var,
+                           minYear = min(df$Year))
+  
+  # Store the data frame for this station
+  minYear[[var]] <- minYear.df
+}
+
+minYear.df <- bind_rows(minYear)
+
+```
+
+Then using that data frame to calculate the adjusted intercept
+
+```{r}
+regressions_adjusted <- regStats_allVars %>%
+  left_join(minYear.df, by = c("variable")) %>%
+  mutate(adjusted_intercept = model_intercept + model_slope * minYear)
+
+write_csv(regressions_adjusted, "data/population_level_data/population_trend_estimates.csv")
+
+```
+
+#### Plotting
+
+```{r, echo=FALSE}
+library(ggplot2)
+# use regressions_adjusted along with the station averages list
+# recall that, due to thow the output of the `mblm` function is structured, it cannot be passed to geom_smooth as a smoothing function. This results in having to 'manually' draw the trend lines.
+
+# List to hold all plots 
+all_plots_list <- list()
+  
+  for (current_var in names(stationAvgs)) {
+    
+    df_avgs <- stationAvgs[[current_var]] %>%
+      bind_rows()
+    
+    df_reg <- regressions_adjusted %>%
+      filter(variable == current_var)
+    
+    var_plot <- ggplot(df_avgs, aes(x = Year, y = MAY_OCT_AVG)) +
+      geom_point(alpha = .3, position = position_jitter(width = 0.3)) +
+        # Use annotate() instead of geom_segment() for the trend line. ggplot expects each aesthetic  to be mapped to a column in the data, and geom_segment() - which I originally used - was receiving values (x, xend, y, and yend) that had only a single length (min and max). Also, aes() is designed to map aesthetics to a SINGLE dataframe, whereas this plot requires reference to two dfs to produce the trend lines.Using `annotate` eliminates the warning because it explicitly adds a line based on single values (rather than having ggplot2 try to match them to rows in df_avgs)
+      annotate("segment", x = min(df_avgs$Year), 
+               xend = max(df_avgs$Year), 
+               y = df_reg$adjusted_intercept, 
+               yend = 
+                 df_reg$adjusted_intercept + df_reg$model_slope * (max(df_avgs$Year) - min(df_avgs$Year)),
+               # calculate the y-value at the endpoint by adding the total change in y (slope * difference_in_years) to the intercept at the starting point
+               color = "red", linewidth = .6, alpha = .8) +
+      labs(title = current_var,
+           subtitle = paste("Slope: ", round(df_reg$model_slope, 5),
+                            "\np-value: ", round(df_reg$model_pval, 5)),
+           x = "Year", y = NULL) +
+      theme_minimal() +
+      theme(plot.title = element_text(face = "bold"))
+
+  all_plots_list[[current_var]] <- var_plot
+}
+
+
+# The plots are generated, now patch them together.
+library(cowplot)
+
+  # Use cowplot::plot_grid to combine plots 
+  combined_plot <- plot_grid(plotlist = all_plots_list, ncol = 2)
+  print(combined_plot)
+  
+  ggsave("figures/population_trend_plots.jpg", combined_plot, height = 10, units = "in", dpi = 600)
+
+```

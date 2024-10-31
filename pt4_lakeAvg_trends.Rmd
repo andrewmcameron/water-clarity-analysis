@@ -31,6 +31,10 @@ data.sub <- data %>%
   filter(STATION_ID %in% stations.df$STATION_ID) %>%
   left_join(stations.df, by = "STATION_ID")
 
+# Remove DIN outlier from SML in 1983
+index <- which.max(data.sub$DIN[data.sub$Lake == "SML" & data.sub$Year == 1983])
+data.sub$DIN[data.sub$Lake == "SML" & data.sub$Year == 1983][index] <- NA
+
 # Define vector for looping through variables
 vars <- c("CHLa", "PHOSPHORUS_TOTAL", "NITROGEN_TOTAL", "DIN", "TSS", "SECCHI_DEPTH")
 
@@ -281,7 +285,7 @@ regressions_adjusted <- regressions_adjusted %>%
 
 ### a. Claytor Lake
 
-```{r, fig.width=6.5, fig.height=7}
+```{r, fig.width=7, fig.height=7}
 lake <- "Claytor Lake"
 data_claytor <- regressions_adjusted %>%
   filter(Lake == lake)
@@ -323,7 +327,7 @@ for (current_var in data_claytor$variable)  {
                yend = df_reg$adjusted_intercept + df_reg$model_slope * (max(df_avgs$Year) - min(df_avgs$Year)),
                color = "red", linewidth = .42, alpha = .6) +
       labs(title = NULL,
-           x = "Year", y = current_y_label) +  # Use the extracted y_label
+           x = NULL, y = current_y_label) +  # Use the extracted y_label
       scale_y_continuous(limits = c(0, max_y), labels = function(y) ifelse(y == 0, "0", format(y, digits = 1, nsmall = 0))) +
       # Set x-axis limits to be consistent
       scale_x_continuous(limits = c(min_year, max_year)) +
@@ -334,7 +338,7 @@ for (current_var in data_claytor$variable)  {
         axis.title = element_text(size = 9.5),        # Adjust axis title size if needed
         axis.text = element_text(size = 7.5, color = "black"),         # Adjust axis text size
         plot.subtitle = element_text(size = 9),     # Adjust subtitle size
-        plot.margin = unit(c(.5, .5, .5, .5), "cm")
+        plot.margin = unit(c(.3, .3, .3, .3), "cm")
       )
   
   claytor_list[[current_var]] <- var_plot
@@ -345,13 +349,13 @@ for (current_var in data_claytor$variable)  {
                               vjust = 4)
   print(claytorAvgs_plot)
   
-ggsave("claytorAvgs_plot.jpg", width = 6.5, height = 7, units = "in", dpi = 1000)
+ggsave("claytorAvgs_plot.jpg", width = 7.2, height = 7, units = "in", dpi = 1000)
 
 ```
 
 ### b. Smith Mountain Lake
 
-```{r, fig.width=6.5, fig.height=7}
+```{r, fig.width=7, fig.height=7}
 lake <- "SML"
 data_SML <- regressions_adjusted %>%
   filter(Lake == lake)
@@ -396,7 +400,7 @@ for (current_var in data_SML$variable)  {
                yend = df_reg$adjusted_intercept + df_reg$model_slope * (max(df_avgs$Year) - min(df_avgs$Year)),
                color = "red", linewidth = .42, alpha = .6) +
       labs(title = NULL,
-           x = "Year", y = current_y_label) +  # Use the extracted y_label
+           x = NULL, y = current_y_label) +  # Use the extracted y_label
       scale_y_continuous(limits = c(0, max_y), labels = function(y) ifelse(y == 0, "0", format(y, digits = 1, nsmall = 0))) +
       # Set x-axis limits to be consistent
       scale_x_continuous(limits = c(min_year, max_year)) +
@@ -407,7 +411,7 @@ for (current_var in data_SML$variable)  {
         axis.title = element_text(size = 9.5),        # Adjust axis title size if needed
         axis.text = element_text(size = 7.5, color = "black"),         # Adjust axis text size
         plot.subtitle = element_text(size = 9),     # Adjust subtitle size
-        plot.margin = unit(c(.5, .5, .5, .5), "cm")
+        plot.margin = unit(c(.3, .3, .3, .3), "cm")
       )
   
   SML_list[[current_var]] <- var_plot
@@ -418,13 +422,13 @@ for (current_var in data_SML$variable)  {
                               vjust = 4)
   print(SMLAvgs_plot)
   
-ggsave("SMLAvgs_plot.jpg", width = 6.5, height = 7, units = "in", dpi = 1000)
+ggsave("SMLAvgs_plot.jpg", width = 7.2, height = 7, units = "in", dpi = 1000)
 
 ```
 
 ### c. Kerr Reservoir
 
-```{r, fig.width=6.5, fig.height=7}
+```{r, fig.width=8, fig.height=7}
 lake <- "Kerr Reservoir"
 data_kerr <- regressions_adjusted %>%
   filter(Lake == lake)
@@ -456,6 +460,7 @@ for (current_var in data_kerr$variable)  {
   # Calculate position for p-value: place it dynamically near the upper right, clear of the data points
   pval_x_pos <- max(df_avgs$Year) - 5  # Adjust the 5 to change how far left from the max Year
   pval_y_pos <- max_y * 0.95           # Place it slightly below the upper limit of the y-axis
+
   
   var_plot <- ggplot(df_avgs, aes(x = Year, y = LakeAvg)) +
     geom_point() +
@@ -469,8 +474,10 @@ for (current_var in data_kerr$variable)  {
                yend = df_reg$adjusted_intercept + df_reg$model_slope * (max(df_avgs$Year) - min(df_avgs$Year)),
                color = "red", linewidth = .42, alpha = .6) +
       labs(title = NULL,
-           x = "Year", y = current_y_label) +  # Use the extracted y_label
-      scale_y_continuous(limits = c(0, max_y), labels = function(y) ifelse(y == 0, "0", format(y, digits = 1, nsmall = 0))) +
+           x = NULL, y = current_y_label) +  # Use the extracted y_label
+      scale_y_continuous(limits = c(0, max_y), 
+                         labels = function(y) ifelse(y == 0, "0", format(y, digits = 1, nsmall = 0))
+                         ) +
       # Set x-axis limits to be consistent
       scale_x_continuous(limits = c(min_year, max_year)) +
       theme_minimal() +
@@ -479,8 +486,8 @@ for (current_var in data_kerr$variable)  {
         axis.line = element_line(color = "black"),  # Make x and y axes black
         axis.title = element_text(size = 9.5),        # Adjust axis title size if needed
         axis.text = element_text(size = 7.5, color = "black"),         # Adjust axis text size
-        plot.subtitle = element_text(size = 9),     # Adjust subtitle size
-        plot.margin = unit(c(.5, .5, .5, .5), "cm")
+        plot.subtitle = element_text(size = 9),
+        plot.margin = unit(c(.3, .3, .3, .3), "cm")
       )
   
   kerr_list[[current_var]] <- var_plot
@@ -491,13 +498,13 @@ for (current_var in data_kerr$variable)  {
                               vjust = 4)
   print(kerrAvgs_plot)
   
-ggsave("kerrAvgs_plot.jpg", width = 6.5, height = 7, units = "in", dpi = 1000)
+ggsave("kerrAvgs_plot.jpg", width = 7.2, height = 7, units = "in", dpi = 1000)
 
 ```
 
 ### d. Lake Anna
 
-```{r, fig.width=6.5, fig.height=7}
+```{r, fig.width=7, fig.height=7}
 lake <- "Lake Anna"
 data_anna <- regressions_adjusted %>%
   filter(Lake == lake)
@@ -542,7 +549,7 @@ for (current_var in data_anna$variable)  {
                yend = df_reg$adjusted_intercept + df_reg$model_slope * (max(df_avgs$Year) - min(df_avgs$Year)),
                color = "red", linewidth = .42, alpha = .6) +
       labs(title = NULL,
-           x = "Year", y = current_y_label) +  # Use the extracted y_label
+           x = NULL, y = current_y_label) +  # Use the extracted y_label
       scale_y_continuous(limits = c(0, max_y), labels = function(y) ifelse(y == 0, "0", format(y, digits = 1, nsmall = 0))) +
       # Set x-axis limits to be consistent
       scale_x_continuous(limits = c(min_year, max_year)) +
@@ -553,7 +560,7 @@ for (current_var in data_anna$variable)  {
         axis.title = element_text(size = 9.5),        # Adjust axis title size if needed
         axis.text = element_text(size = 7.5, color = "black"),         # Adjust axis text size
         plot.subtitle = element_text(size = 9),     # Adjust subtitle size
-        plot.margin = unit(c(.5, .5, .5, .5), "cm")
+        plot.margin = unit(c(.3, .3, .3, .3), "cm")
       )
   
   anna_list[[current_var]] <- var_plot
@@ -564,9 +571,7 @@ for (current_var in data_anna$variable)  {
                               vjust = 4)
   print(annaAvgs_plot)
   
-ggsave("LakeAnnaAvgs_plot.jpg", width = 6.5, height = 7, units = "in", dpi = 1000)
+ggsave("LakeAnnaAvgs_plot.jpg", width = 7.2, height = 7, units = "in", dpi = 1000)
 
 ```
-
-
 

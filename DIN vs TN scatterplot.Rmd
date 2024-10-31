@@ -1,0 +1,106 @@
+---
+title: "DIN vs TN Scatterplot"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+source("C:/Users/andre/my_functions.R")
+
+```
+
+```{r, message = FALSE}
+# Load the data
+data <- read_csv("Data/processed_dataset.csv")
+
+```
+
+### Derive May-Oct averages
+
+Yearly means for DIN and TN.
+
+```{r, message=FALSE}
+# Workflow:
+# loop through each station and calculate a May-Oct average provided that there are at least 3 observations in a year.
+
+vars <- c( "NITROGEN_TOTAL", "DIN")
+stations <- unique(data$STATION_ID)
+
+stationAvgs <- list()
+
+for (station in stations) {
+  
+  station_avgs <- list()
+  
+  for (variable in vars) {
+    # Filter for current station and include only non-NA values of current var
+    data.sbst_station_variable <- data %>%
+      filter(STATION_ID == station) %>%
+      filter(!is.na(!!sym(variable))) # dynamically reference the variable
+
+      # Determine which years have at least 3 obs/yr
+      years_with_3_obs <- data.sbst_station_variable %>%
+        group_by(Year) %>%
+        summarise(n = sum(!is.na(!!sym(variable)))) %>%
+        filter(n >= 3)
+
+        data.sbst_station_variable <- data.sbst_station_variable %>%
+          filter(Year %in% years_with_3_obs$Year) %>% # Only include years with >= 3 obs
+          group_by(Year, STATION_ID) %>%
+          summarise(MAY_OCT_AVG = mean(!!sym(variable), na.rm = TRUE))
+
+        # Add the May-Oct average for variable to the station_avgs list
+        station_avgs[[variable]] <- data.sbst_station_variable
+      }
+  # Only add station to the final list if it has valid averages for at least one variable
+  if (length(station_avgs) > 0) {
+    stationAvgs[[station]] <- station_avgs
+  }
+}
+
+## List structure:
+## list[[station]]$variable  variable = df with Year, STATION_ID, MAY_OCT_AVG
+
+
+# Simplify the list
+bound_averages <- list()
+for (station in names(stationAvgs) ) {
+  bound <- bind_rows(stationAvgs[[station]], .id = "variable")
+  bound_averages[[station]] <- bound
+}
+
+# Combine all station averages into one dataframe
+mayOctAvgs_df <- bind_rows(bound_averages)
+
+
+nitro_data <- mayOctAvgs_df %>%
+  pivot_wider(names_from = variable, values_from = MAY_OCT_AVG) %>%
+  filter(!is.na(DIN) & !is.na(NITROGEN_TOTAL)) %>%
+  arrange(STATION_ID, Year)
+
+table(nitro_data$Year)
+write_csv(nitro_data, "Data/DINvsTN.csv")
+
+```
+
+### Scatterplot
+
+"Could you make a scatterplot of May-Oct mean DIN (x) vs May-Oct mean TN (y)?  Each data point would represent one station-year.  For most of our stations, the DIN data are pre-2000 and the TN data are post-2000 so I am not sure how many data points we will get, but I would like to show that most of the TN is in the form of DIN (i.e., the two should be correlated)."
+
+```{r}
+# Create the scatterplot
+r_val <- cor(nitro_data$DIN, nitro_data$NITROGEN_TOTAL)
+
+ggplot(nitro_data, aes(x = DIN, y = NITROGEN_TOTAL)) +
+  geom_point(alpha = .65) +
+  labs(title = "May-Oct Mean DIN vs TN",
+       x = "DIN (mg/L)",
+       y = "TN (mg/L)") +
+  annotate("text", x = .22, y = 1.25, label = paste("r =", round(r_val, 3)),
+           hjust = 1.1, vjust = 1.1, size = 4.5)
+  theme_minimal()
+
+  ggsave("figures/DINvsTN.jpg", width = 6, height = 6, dpi = 600)
+
+
+```
