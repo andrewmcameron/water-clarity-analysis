@@ -1,14 +1,23 @@
 ---
-title: "Reservoir Water Clatity: Population Level Analysis"
+title: "Box plot/MBLM Trend Overlay"
 output: html_document
 date: "2024-10-09"
 ---
+
+[This file is a copied and modified version of pt3_population_level_analysis
+I wanted to keep that file intact, as the visualization request involves removing certain data points from the original dataset.]
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 
 ```
+
+"There is another thing I would like to try with the population data, but I'm not sure it will work.
+I was wondering if you could take the model results from the plots you just sent, and overlay the trend lines on the box plots you made previously.  The aggregated data (box plots at 5-y intervals) are more useful for visualizing the data, but it would be helpful to also show how the model trend looks.
+In doing this, I would like to re-run the mblm for Secchi and CHLa excluding the early data (1980-84), so the trend is based on data collected since 1995, and the model line added to the box plot starts with the 1995 group.
+For TSS, I would like to fit the mblm to data spanning 1980 to 2005, which is where we have the most data (the model trend line would span the 5 boxes corresponding to this period).
+For TN and TP, I would like to use all the data (i.e., the model you have already created)."
 
 ```{r, message = FALSE}
 # Load the data
@@ -27,7 +36,7 @@ metadata <- read_csv("Data/station_metadata.csv")
 
  "For this, we will be working with the subset of stations that have at least 5 years of data (inclusive of those used in the trend analysis).  From the station metadata, I estimate there are ~175 stations that meet this minimum for Secchi, CHLa, TN and TP (~40 for TSS)."  (*Still min 3 Nobs, presumably*??)
  
-```{r}
+```{r `subset data`}
 # Function to subset data based on a minimum years of observations threshold. All station-variables in `data` have already been filtered to include only those with min 3 measurements per year (May-Oct). 
 # In this case, 5 years of observations is the threshold.
 subset_variable_data <- function(metadata_column, threshold = 5) {
@@ -48,8 +57,10 @@ subset_data <- list(
   TSS = subset_variable_data("nYears_TSS"),
   DIN = subset_variable_data("nYears_DIN")
 )
+```
 
-# Remove outliers
+### Outlier Removal
+```{r}
 ## DIN outlier from station 4AROA192.94
 din_data <- subset_data[["DIN"]]
 index <- which.max(din_data$DIN[din_data$STATION_ID == "4AROA192.94"])
@@ -65,63 +76,20 @@ chla_data$CHLa[chla_data$STATION_ID == "2-XDD000.40"][index1] <- NA
 chla_data$CHLa[chla_data$STATION_ID == "5ASRN000.66"][index2] <- NA
 subset_data[["CHLa"]] <- chla_data
 
-```
 
-# Summary Statistics
- 
-"I would like to get a file containing the long-term min, mean, median and max for each of the 6 variables (CHLa, TSS, etc.) by station for all the stations that meet the minimum of 5 years criterion."
 
-```{r}
-# Function to calculate summary statistics for each variable by station
-calculate_summary_stats <- function(data, variable) {
-  return(data %>%
-    group_by(STATION_ID) %>%
-    summarise(
-      min = min(!!sym(variable), na.rm = TRUE),
-      mean = mean(!!sym(variable), na.rm = TRUE),
-      median = median(!!sym(variable), na.rm = TRUE),
-      max = max(!!sym(variable), na.rm = TRUE)
-    ))
+## Remove data from pre-1995 for CHLa and Secchi
+for (var in c("CHLa", "SECCHI_DEPTH")) {
+  subset_data[[var]] <- subset_data[[var]] %>%
+    filter(Year >= 1995)
 }
 
-
-summary_list <- list() # List to hold summary stats for each variable
-
-# Use above function in for loop, storing results in list
-for (var in names(subset_data)) {
-  df <- subset_data[[var]]
-  summary_stats <- calculate_summary_stats(df, var)
-  
-  summary_list[[var]] <- summary_stats
-}
-
-# Bind into single df
-summary_df <- bind_rows(summary_list, .id = "variable") %>%
-  relocate(variable, .after = "STATION_ID")
-
-## "organize these data so that there is a single column of Station IDs followed by 4 columns each (min, mean, median, max) for CHLa, TN, TP, etc.
-## That way there is a single row per station containing all the statistics for the 6 variables"
-summary_df_wide <- summary_df %>%
-  pivot_wider(
-    names_from = variable,
-    values_from = c(min, mean, median, max),
-    names_glue = "{variable}_{.value}"
-  ) %>%
-  select(
-    STATION_ID,
-    matches("^CHLa_"), 
-    matches("^SECCHI_DEPTH_"), 
-    matches("^NITROGEN_TOTAL_"), 
-    matches("^PHOSPHORUS_TOTAL_"), 
-    matches("^TSS_"), 
-    matches("^DIN_")
-  )
-
-summary_df_wide
-
-write_csv(summary_df_wide, "data/5y_summaryStats_wide.csv")
+## Filter to only include 1980-2005 for TSS
+subset_data[["TSS"]] <- subset_data[["TSS"]] %>%
+  filter(Year >= 1980, Year <= 2005)
 
 ```
+
 
 # Box-Whisker Plots
 
@@ -171,7 +139,7 @@ for (var in names(subset_data)) {
 
 ```
 
-How many observations per interval, per variable? This informatio needs to be incorporated into the plots.
+How many observations per interval, per variable? This information needs to be incorporated into the plots.
 
 ```{r}
 # List of Nobs per interval for incorporation into plots
@@ -179,7 +147,7 @@ obs_counts <- list()
 for (var in names(boxplot_data)) {
   x <- boxplot_data[[var]]
   x_counts <- x %>%
-    group_by(interval) %>%
+    group_by(interval, interval_midpoint) %>%
     summarise(n = n())
   
   obs_counts[[var]] <- x_counts
@@ -187,32 +155,6 @@ for (var in names(boxplot_data)) {
 
 ```
 
-## Interval statistics
-
-Generate a file of the statistics associated with the box-whisker results (N Obs and median values for each span of years shown in the plots).
-
-```{r}
-summarize_intervals <- function(x, y) {
-  x %>%
-    left_join(y, by = "interval") %>%
-    group_by(interval) %>%
-    summarise(
-      n = first(n),
-      median = median(yearly_mean, na.rm = TRUE)
-    )
-}
-
-interval_summaries <- list()
-for (var in names(boxplot_data)) {
-  interval_summaries[[var]] <- summarize_intervals(boxplot_data[[var]], obs_counts[[var]])
-}
-
-interval_summary.df <- bind_rows(interval_summaries, .id = "variable") %>%
-  relocate(variable, .after = "interval")
-
-write_csv(interval_summary.df, "data/population_boxplot_interval_summaries.csv")
-
-```
 
 ## Create Box-Whisker Plots
 
@@ -238,7 +180,6 @@ library(ggplot2)
           axis.text.x = element_text(angle = 45, hjust = 1, size = 10))  
   
   print(plot_secchi)
-  ggsave("figures/secchi_boxplot.jpg", plot_secchi, width = 7, height = 5, units = "in", dpi = 600)
   
 # ------------- Chlorophyll-A  -------------------------
   ## Filter out CHLa values above 300 to minimize y axis distortion
@@ -263,7 +204,6 @@ library(ggplot2)
           axis.text.x = element_text(angle = 45, hjust = 1, size = 10))    
   
   print(plot_chla)
-  ggsave("figures/chla_boxplot.jpg", plot_chla, width = 7, height = 5, units = "in", dpi = 600)
   
     # ------------ CHLa log base 10 transformed -------------------------
         trnsfrm.data <- boxplot_data[["CHLa"]] %>%
@@ -291,8 +231,7 @@ library(ggplot2)
                 axis.text.x = element_text(angle = 45, hjust = 1, size = 10))   
         
         print(plot_chlalog10)
-        ggsave("figures/log10_chla_boxplot.jpg", plot_chlalog10, width = 7, height = 5, units = "in", dpi = 600)
-    
+
 
 # ------------- Total Nitrogen -------------------------
   ## Filter out TN values above 2 to minimize y axis distortion
@@ -318,7 +257,7 @@ library(ggplot2)
         axis.text.x = element_text(angle = 45, hjust = 1, size = 10))   
   
   print(plot_tn)
-  ggsave("figures/tn_boxplot.jpg", plot_tn, width = 7, height = 5, units = "in", dpi = 600)
+
 
 # ------------- Total Phosphorus -------------------------
   ## Filter out TP values above .3 to minimize y axis distortion
@@ -344,7 +283,7 @@ library(ggplot2)
         axis.text.x = element_text(angle = 45, hjust = 1, size = 10))    
   
   print(plot_tp)
-  ggsave("figures/tp_boxplot.jpg", plot_tp, width = 7, height = 5, units = "in", dpi = 600)
+
   
 # ------------- Total Suspended Solids-------------------------
   ## Filter out TSS values above 50 (n = 34) to minimize y axis distortion
@@ -370,9 +309,36 @@ library(ggplot2)
         axis.text.x = element_text(angle = 45, hjust = 1, size = 10))    
   
   print(plot_tss)
-  ggsave("figures/tss_boxplot.jpg", plot_tss, width = 7, height = 5, units = "in", dpi = 600)
+ 
 
 ```
+### Continuous Axis for Boxplot Data
+
+To overlay your MBLM trend lines onto the box plots in ggplot2, I need to align the categorical x-axis (the 5-year intervals) with the continuous x-axis (Year) used for the trend lines.
+
+    Convert the Categorical Intervals to Numeric Midpoints: Assign numeric values (midpoints of the intervals) to each interval, effectively transforming your categorical x-axis into a continuous one.
+
+    Update Data Frames: Add these midpoints to your boxplot_data so that each observation has an interval_midpoint.
+
+    Adjust Plots: Modify your plotting code to use interval_midpoint as the x-axis, allowing both the box plots and trend lines to share the same continuous x-axis.
+
+```{r}
+# Create a data frame mapping intervals to midpoints
+intervals_df <- data.frame(
+  interval = c("1972-1974", "1975-1979", "1980-1984", "1985-1989",
+               "1990-1994", "1995-1999", "2000-2004", "2005-2009",
+               "2010-2014", "2015-2019", "2020-2023"),
+  interval_midpoint = c(1973, 1977, 1982, 1987, 1992, 1997, 2002, 2007, 2012, 2017, 2021.5)
+)
+
+# Merge interval_midpoint into boxplot_data
+for (var in names(boxplot_data)) {
+  boxplot_data[[var]] <- boxplot_data[[var]] %>%
+    left_join(intervals_df, by = "interval")
+}
+
+```
+
 
 # MBLM Trend Estimates
 
@@ -405,6 +371,7 @@ for (var in vars) {
       filter(!is.na(!!sym(var))) # dynamically reference the variable
              
     # Group observations by year and filter for only years with 3 or more obs
+    # This is redundant, as the processed dataset generated in pt1 file already filters for min 3 obs per station-year. But no harm in being extra cautious.
       years_with_3_obs <- station_df %>%
         group_by(Year) %>%
         summarise(n = sum(!is.na(!!sym(var)))) %>%
@@ -436,7 +403,7 @@ for (var in vars) {
 
 all_vars_avg_df <- bind_rows(avg_df_list, .id = "variable")
 
-write_csv(all_vars_avg_df, "data/population_level_data/population_avg_data.csv")
+# write_csv(all_vars_avg_df, "data/population_level_data/population_avg_data.csv")
 
 ```
 
@@ -448,6 +415,7 @@ write_csv(all_vars_avg_df, "data/population_level_data/population_avg_data.csv")
 # [4] "PHOSPHORUS_TOTAL" "TSS"              "DIN"
 
 # Create function to loop through each variable and fit mblm
+# Essential to use the stationAvgs list, as the boxplot_data lsit, despite having been derived from the same soruce and in the same sort of way, has had lots of outliers filtered out for plotting. Those outliers should still be in the mblm trend analysis.
 mblm_func <- function(variable) {
   
   averages_list <- stationAvgs[[variable]]
@@ -513,12 +481,10 @@ for (variable in names(trends_results)) {
 
 # ------- Create data frames from lists -------
 regStats_allVars <- bind_rows(regStats) 
-
 ```
 
-### Visualize Models
 
-#### Adjusted model intercept
+## Adjusted model intercept
 
 Because the model intercept is based on x=0, and the x-axes are somewhere between 197X and 200x, I create an adjusted model intercept based on the following formula:
 
@@ -551,8 +517,6 @@ Then using that data frame to calculate the adjusted intercept
 regressions_adjusted <- regStats_allVars %>%
   left_join(minYear.df, by = c("variable")) %>%
   mutate(adjusted_intercept = model_intercept + model_slope * minYear)
-
-write_csv(regressions_adjusted, "data/population_level_data/population_trend_estimates.csv")
 
 ```
 
@@ -602,10 +566,85 @@ library(cowplot)
   combined_plot <- plot_grid(plotlist = all_plots_list, ncol = 2)
   print(combined_plot)
   
-  ggsave("figures/population_trend_plots.jpg", combined_plot, height = 10, units = "in", dpi = 600)
+  # ggsave("figures/population_trend_plots.jpg", combined_plot, height = 10, units = "in", dpi = 600)
 
 ```
 
+# Overlay Trend Lines on Box Plots
+
+```{r}
+# Assuming you have 'df_reg' and 'df_avgs' for each variable
+# Example for "SECCHI_DEPTH"
+
+# Prepare data for trend line
+df_avgs <- bind_rows(stationAvgs[["SECCHI_DEPTH"]]) %>% 
+  filter(Year >= 1995) # Filter for years >= 1995
+
+df_reg <- regressions_adjusted %>%
+  filter(variable == "SECCHI_DEPTH")
+
+# Generate a sequence of years for plotting the trend line
+year_seq <- seq(min(df_avgs$Year), max(df_avgs$Year), by = 1)
+
+# Compute predicted values from the model
+trend_data <- data.frame(
+  Year = year_seq,
+  Trend = df_reg$model_intercept + df_reg$model_slope * year_seq
+)
+
+```
+
+```{r}
+# Plot for "SECCHI_DEPTH"
+plot_secchi <- ggplot() +
+  # Boxplots with continuous x-axis
+  geom_boxplot(
+    data = boxplot_data[["SECCHI_DEPTH"]] %>%
+      filter(Year >= 1995),
+    aes(x = interval_midpoint, y = yearly_mean, group = interval_midpoint),
+    color = "black",
+    width = 3.2,  # Adjust width as needed
+    outlier.shape = NA
+  ) +
+  # Jittered points
+  geom_jitter(
+    data = boxplot_data[["SECCHI_DEPTH"]] %>%
+      filter(Year >= 1995),
+    aes(x = interval_midpoint, y = yearly_mean),
+    width = 1, alpha = 0.2, size = 0.7
+  ) +
+  # Trend line
+  geom_line(
+    data = trend_data,
+    aes(x = Year, y = Trend),
+    color = "red", size = 1, alpha = 1
+  ) +
+  geom_text(data = obs_counts[["SECCHI_DEPTH"]], aes(x = interval_midpoint, y = max(boxplot_data[["SECCHI_DEPTH"]]$yearly_mean, na.rm = TRUE), 
+                                   label = paste("n =", n)), 
+            vjust = -0.5, size = 3, color = "black") +  # Add observation counts
+  # Labels and themes
+  labs(
+    title = NULL,
+    subtitle = paste("Slope:", round(df_reg$model_slope, 5), "p-value:", round(df_reg$model_pval, 5)),
+    x = NULL,
+    y = "Depth (m)"
+  ) +
+  # Adjust x-axis to display intervals
+  scale_x_continuous(
+    breaks = intervals_df$interval_midpoint,
+    labels = intervals_df$interval
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 9)
+  )
+
+print(plot_secchi)
+
+ ggsave("figures/secchi_boxplot_trend_overlay.jpg", plot_secchi, height = 6, width = 8.2, units = "in", dpi = 600)
+
+```
 
 
 
@@ -613,31 +652,19 @@ library(cowplot)
 ## SAND BOX
 ## NOTE TO SELF: The reason there are so many fewer e.g. DIN station-years in the mblm model than in the  DIN vs TN plot is that we were not applying a year threshold to the DIN vs TN data set.
 
-x %>% 
-  select(DATE, Month, Year, STATION_YEAR, DIN, STATION_ID) %>%
-  filter(!is.na(DIN)) %>%
-  group_by(STATION_YEAR) -> y
+new <- all_vars_avg_df %>%
+  mutate(station_yr_var = paste(STATION_ID, Year, variable, sep = "-"))
+old <- read_csv("data/population_level_data/population_avg_data_ORIGINAL_error.csv") %>%
+  mutate(station_yr_var = paste(STATION_ID, Year, variable, sep = "-"))
 
-y %>%
-  group_by(STATION_ID, Year) %>%
-          summarise(MAY_OCT_AVG = mean(DIN, na.rm = TRUE)) -> DIN_avgs
-
-bind_rows(stationAvgs$CHLa) -> x  # 1771 rows
-boxplot_data$CHLa -> y # 1708 rows...why so fewer
+# Which station_yr_var vals not present in the old data set??
+missing_in_old <- anti_join(new, old, by = "station_yr_var")
 
 
-missing_rows <- anti_join(
-  bind_rows(stationAvgs$CHLa) %>% select(STATION_ID, Year),
-  boxplot_data$CHLa %>% select(STATION_ID, Year),
-  by = c("STATION_ID", "Year")
-)
+missing_in_old %>%
+  mutate(MAY_OCT_AVG = as.character(MAY_OCT_AVG))
 
-x %>% filter(STATION_ID == "1ALOH007.93")
+# PHOSPHORUS_TOTAL	1991	4AROA192.55	0.133333333333333	4AROA192.55-1991-PHOSPHORUS_TOTAL
 
-x_w_intervals %>%  filter(STATION_ID == "1ALOH007.93")
-boxplot_data$CHLa %>% filter(STATION_ID == "1ALOH007.93")
-missing_rows
-
-boxplot_data$CHLa %>%
-  filter(STATION_ID == "1ALOH007.93")
+unique(missing_in_old$STATION_ID)
 ```

@@ -170,13 +170,8 @@ combined_data <- bind_rows(joined_df, LAsupp.df)
 combined_data <- combined_data %>%
   group_by(StationDate) %>%
   summarize(across(c(STATION_ID, DATE, Year, Month), first),
-            across(c(CHLa, SECCHI_DEPTH, NITROGEN_TOTAL, PHOSPHORUS_TOTAL, PHOSPHORUS_ORTHO, TURBIDITY_HACH, TURBIDITY_NTU), ~ mean(.x, na.rm = TRUE)))
-
-combined_data %>%
-  select(Year, STATION_ID, StationDate, NITROGEN_TOTAL) %>%
-  filter(!is.na(NITROGEN_TOTAL))-> tn
-
-
+            across(c(CHLa, SECCHI_DEPTH, NITROGEN_TOTAL, PHOSPHORUS_TOTAL, PHOSPHORUS_ORTHO, TURBIDITY_HACH, TURBIDITY_NTU), ~ mean(.x, na.rm = TRUE))
+            )
 
 ```
 
