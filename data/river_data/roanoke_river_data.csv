@@ -1,0 +1,7 @@
+OrganizationFormalName,MonitoringLocationIdentifier,ActivityStartDate,CharacteristicName,ResultMeasureValue,ResultMeasure.MeasureUnitCode,USGSPCode
+USGS North Carolina Water Science Center,USGS-0208114150,2012-07-12,Total suspended solids,NA,NA,00530
+USGS North Carolina Water Science Center,USGS-0208114150,2012-07-12,Phosphorus,0.056,mg/l as P,00665
+USGS North Carolina Water Science Center,USGS-0208114150,2012-07-12,"Nitrogen, mixed forms (NH3), (NH4), organic, (NO2) and (NO3)",0.61,mg/l,00600
+USGS North Carolina Water Science Center,USGS-0208114150,2012-08-30,Total suspended solids,NA,NA,00530
+USGS North Carolina Water Science Center,USGS-0208114150,2012-08-30,Phosphorus,0.076,mg/l as P,00665
+USGS North Carolina Water Science Center,USGS-0208114150,2012-08-30,"Nitrogen, mixed forms (NH3), (NH4), organic, (NO2) and (NO3)",0.6,mg/l,00600

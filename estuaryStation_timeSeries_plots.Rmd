@@ -1,0 +1,31 @@
+---
+title: "Estuary Station Trend Plots"
+output:
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(cowplot)
+# This loads in the plots, which were generated in the file named 'pt5_river_analysis.Rmd'
+load("estuaryStations_all_plots_list.RData")
+```
+
+```{r, echo=FALSE, results='asis', fig.width=6.5, fig.height=7}
+# Display each station's combined plots
+for (station in names(all_plots_list)) {
+  # Print the station header as an RMarkdown header (### is level 3)
+  cat("### Station: ", station, "\n\n")
+  
+  # Use cowplot::plot_grid to combine plots and avoid appearance of "$variable" on axis
+  combined_plot <- plot_grid(plotlist = all_plots_list[[station]], ncol = 2)
+  print(combined_plot)
+  
+  # Add some space between stations
+  cat("\n\n")
+}
+
+```

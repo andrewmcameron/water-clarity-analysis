@@ -85,13 +85,15 @@ subset_data[["SECCHI_DEPTH"]] <- subset_data[["SECCHI_DEPTH"]] %>%
 subset_data[["DIN"]] <- subset_data[["DIN"]] %>%
   filter(Year <= 2004)
 
+## Filter TP to only include 1980 and after
+subset_data[["PHOSPHORUS_TOTAL"]] <- subset_data[["PHOSPHORUS_TOTAL"]] %>%
+  filter(Year >= 1980)
+
+
 ```
 
 
 # Box-Whisker Plots
-
- Next, I would like to see box-whisker plots for each variable with the data partitioned into 5-y increments.  For convenience, I would suggest making the last box a 4-y increment (2020-23) and then go backwards in 5-y increments (2000-04, 2005-09, 2010-14, 2015-19, etc.).  As we go back past 2000, the data become more sparse.  *It would be helpful to indicate on the plot the number of observations used to make each box.  We will likely adopt a cut-off below which we will not include that interval/variable, but I don't know offhand what that should be.*
-
 
 ### Partition Data - 5y Increments
 
@@ -147,7 +149,7 @@ To overlay your MBLM trend lines onto the box plots in ggplot2, I need to align 
 
     Convert the Categorical Intervals to Numeric Midpoints: Assign numeric values (midpoints of the intervals) to each interval, effectively transforming your categorical x-axis into a continuous one.
 
-    Update Data Frames: Add these midpoints to your boxplot_data so that each observation has an interval_midpoint.
+    Update Data Frames: Add these midpoints to boxplot_data so that each observation has an interval_midpoint.
 
     Adjust Plots: Modify your plotting code to use interval_midpoint as the x-axis, allowing both the box plots and trend lines to share the same continuous x-axis.
 
@@ -346,7 +348,7 @@ regStats_allVars <- bind_rows(regStats)
 
 ## Adjusted model intercept
 
-Because the model intercept is based on x=0, and the x-axes are somewhere between 197X and 200x, I create an adjusted model intercept based on the following formula:
+Because the model intercept is based on x=0, and the x-axes are somewhere between 197X and 200x, I created an adjusted model intercept based on the following formula:
 
 `adjusted_intercept = model_intercept + model_slope * min(Year)`
 
@@ -369,6 +371,20 @@ for (var in vars) {
 
 minYear.df <- bind_rows(minYear)
 
+## ADJUSTMENT TO MIN YEAR TO REFLECT BOX EDGE
+## Given boxplot overlay, the min year should be changed to reflect the first year of whichever **interval** (i.e., box) the min year corresponds to. The above approach worked when only plotting trend lines.
+# adjusted intercept based on min year, but the min year does not correspond to the x axis value where the line is actually beginning. CHLa log10, for instance, is min year 1999, and so 1999 is 0, but the line begins a the left ede of the box, or 1995. this may be more masked in CHLa plot, because of scale ,or something, but is exaggerated in the log transformed data and plot.
+
+
+minYr.interval <- data.frame(variable = minYear.df$variable,
+                             min.Interval = c(1995.4, 1995.4, 2000.4, 1975.4, 1980.4, 1972.4, 1995.4)  # for complete accuracy the min interval needs to correspond to left most edge of box to which minimum year belogns.
+)
+
+
+minYear.df <- minYear.df %>%
+  left_join(minYr.interval, by = "variable")
+
+
 ```
 
 ...then using that data frame to calculate the adjusted intercept
@@ -376,8 +392,7 @@ minYear.df <- bind_rows(minYear)
 ```{r}
 regressions_adjusted <- regStats_allVars %>%
   left_join(minYear.df, by = c("variable")) %>%
-  mutate(adjusted_intercept = model_intercept + model_slope * minYear)
-
+  mutate(adjusted_intercept = model_intercept + model_slope * min.Interval)
 
 ### NOTE 11/8/2024  -- Data included in the models was modified per Paul's email on 11/7. Thus, reg. stats for several of the variables do not match those I sent to him on 11/5 (e.g., DIN now only includes data through 2004; TSS data is now 1980-2005, etc.)
 
@@ -387,7 +402,6 @@ regressions_adjusted <- regStats_allVars %>%
 # Overlay Trend Lines on Box Plots
 
 ```{r}
-library(ggtext)
 # Create named list for defining y axis labels in plots
 y_titles <- list(
   SECCHI_DEPTH = "Depth (m)",
@@ -419,31 +433,24 @@ boxtrend_overlay <- function(current_var) {
   df_reg <- regressions_adjusted %>%
     filter(variable == current_var)
   
-  # Default start and end y-values for the trend line
-  start_y <- df_reg$adjusted_intercept
-  end_y <- df_reg$adjusted_intercept + df_reg$model_slope * (max(df_avgs$Year) - min(df_avgs$Year))
+
+  # Define start and end values along each axis for mblm trend lines
+  # x axis values are defined in relation to the width of each box (3.2 units)
+      # Use default values for all other variables
+    start_x <- min(boxplot_data[[current_var]]$interval_midpoint) - (3.2 / 2)
+    end_x <- max(boxplot_data[[current_var]]$interval_midpoint) + (3.2 / 2)
+    # Default start and end y-values for the trend line
+    start_y <- df_reg$adjusted_intercept
+    end_y <- df_reg$adjusted_intercept + df_reg$model_slope * (max(df_avgs$Year) - df_reg$min.Interval)
+    
+    # Special cases for CHLa_log10 and TSS
+    if (current_var == "CHLa_log10") {
+      start_x <- 1997 - (3.2 / 2) 
+    } else if (current_var == "TSS") {
+      start_x <- 1982 - (3.2 / 2)
+      end_x <- 2002 + (3.2 / 2)
+    }
   
-  # Calculate default x min and x max based on box plot edges
-  min_x <- min(boxplot_data[[current_var]]$interval_midpoint) - (3.2 / 2)
-  max_x <- max(boxplot_data[[current_var]]$interval_midpoint) + (3.2 / 2)
-  
-  # Special cases for CHLa_log10 and TSS
-  if (current_var == "CHLa_log10") {
-    start_x <- 1997 - (3.2 / 2) 
-    end_x <- max_x  # End at the default max
-    start_y <- df_reg$model_slope * (start_x - min(df_avgs$Year)) + df_reg$adjusted_intercept
-  } else if (current_var == "TSS") {
-    start_x <- 1982 - (3.2 / 2)
-    end_x <- 2002 + (3.2 / 2)
-    start_y <- df_reg$model_slope * (start_x - min(df_avgs$Year)) + df_reg$adjusted_intercept
-    end_y <- df_reg$model_slope * (end_x - min(df_avgs$Year)) + df_reg$adjusted_intercept
-  } else {
-    # Use default values for all other variables
-    start_x <- min_x
-    end_x <- max_x
-  }
-  
-  obs_counts[[current_var]]$label <- paste0("*", obs_counts[[current_var]]$n, "*")
   
   # Generate plot
   plot <- ggplot() +
@@ -503,14 +510,14 @@ boxtrend_overlay <- function(current_var) {
 
 ## Generate Plots
 
-```{r}
+```{r warning =FALSE}
 # Create list of plots for each variable
 plots_list <- list()
 
 for (var in vars) {
   plots_list[[var]] <- boxtrend_overlay(var)
   
-  ggsave(paste0("figures/boxplot_trend_overlay_", var, ".jpg"), plots_list[[var]], width = 10, height = 7, units = "in", dpi = 1000)
+  ggsave(paste0("figures/boxplot_trend_overlay_MINADJUST_", var, ".jpg"), plots_list[[var]], width = 10, height = 7, units = "in", dpi = 1000)
 }
 
 plots_list

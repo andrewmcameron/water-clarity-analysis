@@ -1,0 +1,410 @@
+---
+title: "Estuary Station Analysis"
+author: "Andrew Cameron"
+date: "2024-11-16"
+output: html_document
+---
+
+"The third and final part is to compare trends in reservoirs and rivers with estuaries.  So far as I know, no one has tried to pull together these three databases (not these specific databases, or generally to make comparisons across inland and coastal waters for trends in TN & TP).
+The attached file has monthly observations from a number of stations located within Ches Bay.  The procedure should be the same as was used for rivers and estuaries: reduce the monthly data to May-Oct averages, then fit mblms to the annual data."
+
+Trend Analysis					
+1	Reduce data to May-Oct average values for each year by station.				
+2	Generate statistical summary (mean, median, Nobs) by station by variable.				
+3	Generate trend statistics (slope,MAD,p) using mblm by station by variable.				
+					
+Variables of interest:		CHLA	DIN	SECCHI	TN   TP  TSS
+					
+Data Screening					
+	Sample Replicate Type:				
+		Coded as S1 (or M1 for Secchi) except where duplicates were collected (coded as FS1 & FS2)			
+		Use S1, M1 and FS1 data.			
+					
+	Layer:	use "S" only.			
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+
+library(tidyverse)
+source("C:/Users/andre/my_functions.R")
+
+```
+
+# Load and Filter Data
+
+```{r}
+# Load and filter raw data to include only the relevant parameters and replicate types
+data <- openxlsx::read.xlsx("data/estuarine_data/CBP Estuarine Data.xlsx", sheet = 2) %>%
+  mutate(SampleDate = convertExcelDateTime(., "SampleDate")) %>%
+  filter(Parameter %in% c("CHLA", "DIN", "SECCHI", "TN", "TP", "TSS")) %>%
+  filter(SampleReplicateType %in% c("S1", "M1", "FS1")) %>%
+  filter(SampleDate <= "2023-12-31")
+
+## -- handling duplicates --
+# Identify duplicates
+duplicates <- data %>%
+  select(Station, SampleDate, Parameter) %>%
+  duplicated()
+# There are a *lot* of duplicates based on station-date-parameter.
+
+# Get indices of both duplicate rows and their matches.
+duplicate_indices <- which(duplicates | duplicated(data %>% select(Station, SampleDate, Parameter), fromLast = TRUE))
+
+# View both the duplicate and matching rows
+data[duplicate_indices, ] %>%
+  select(Station, SampleDate, Parameter, MeasureValue, Method) -> x
+
+## Many duplicates owing to multiple "Method" values for the same "Parameter" value. Handle these by taking the mean of the "MeasureValue" values.
+data <- data %>%
+  select(CBSeg2003, Station, SampleDate, Parameter, MeasureValue) %>%
+  group_by(CBSeg2003, Station, SampleDate, Parameter) %>%
+  summarize(MeanVal = mean(MeasureValue, na.rm = TRUE), .groups = "drop") %>%  # treat duplicate
+  pivot_wider(names_from = Parameter, values_from = MeanVal) %>%
+  mutate(Month = month(SampleDate),
+         Year = year(SampleDate)) %>%
+  filter(Month >= 5 & Month <= 10)
+
+```
+
+# Select for Station-Years w/ Nobs >= 3
+
+```{r}
+# --------- Remove site years that do not have a minimum of 3 measurements in May-Oct ------------
+  ## Create station-year field
+  stationyears <- data %>%
+    mutate(STATION_YEAR = paste(Station, Year, sep = "_"))
+
+  ## How many unique station-years currently?
+  length(unique(stationyears$STATION_YEAR)) # 1134 unique site years
+  
+  ## Which station-years have at least 3 measurements for each variable?
+  x <- stationyears %>%
+     group_by(STATION_YEAR) %>%
+      summarise(
+        N_CHLA = sum(!is.na(CHLA)),
+        N_TN = sum(!is.na(TN)),
+        N_DIN = sum(!is.na(DIN)),
+        N_TP = sum(!is.na(TP)),
+        N_TSS = sum(!is.na(TSS)),
+        N_SECCHI = sum(!is.na(SECCHI))
+      )
+  
+  index_chla <- x$STATION_YEAR[x$N_CHLA >= 3]
+  index_nitrogen <- x$STATION_YEAR[x$N_TN >= 3]
+  index_din <- x$STATION_YEAR[x$N_DIN >= 3]
+  index_phosphorus <- x$STATION_YEAR[x$N_TP >= 3]
+  index_TSS<- x$STATION_YEAR[x$N_TSS >= 3]
+  index_secchi <- x$STATION_YEAR[x$N_SECCHI >= 3]
+
+  
+# This list will be used to loop through and subset each variable in its own df where station-year Nobs >= 3. The resulting list of dfs will eventually be used for mblm trend estimates.
+variables <- list(
+  CHLA = "index_chla",
+  TN = "index_nitrogen",
+  DIN = "index_din",
+  TP = "index_phosphorus",
+  TSS = "index_TSS",
+  SECCHI = "index_secchi"
+)
+
+# Loop through variables and subset data
+analysis.dfs <- lapply(names(variables), function(var) {
+  
+  index_var <- get(variables[[var]])  
+  stationyears %>%
+    filter(STATION_YEAR %in% index_var) %>%
+    select(CBSeg2003, Station, SampleDate, all_of(var), Year, Month, STATION_YEAR)
+  
+})
+
+# Use variables list to name the resulting data frames
+names(analysis.dfs) <- names(variables)
+
+```
+
+# Single data set for all wrangled variables
+
+Each variable of interest is in its own data frame within the `analysis.dfs` list. Each df has the same schema, with only the variable column differing. This chunk simply joins all of those data frames into a single data frame. 
+
+```{r}
+#  Join on all except the variable column. This avoids duplicate cols
+join_columns <- c("CBSeg2003", "Station", "SampleDate", "Year", "Month", "STATION_YEAR")
+
+# Use purrr::reduce to join all data frames based on the common columns
+my_data <- reduce(analysis.dfs, full_join, by = join_columns) %>%
+  relocate(CHLA, .after = "STATION_YEAR")
+
+write_csv(my_data, "data/estuarine_data/processed_estuaryData.csv")
+
+```
+
+# Derive Station Metadata & Summary Statistics
+
+```{r}
+## For stations with no data for a given variable, minYear and maxYear are missing and return as `Inf` or `-Inf`. The `ifelse` function is used to replace these values with NA.
+metadata <- data %>%
+  group_by(Station) %>%
+  summarise(
+    across(
+      c(CHLA, TN, DIN, TP, TSS, SECCHI),      # 1. Specify variables (columns) to summarize
+      list(                       # 2. Define the metrics to calculate for each variable
+        minYear = ~ ifelse(is.infinite(min(Year[!is.na(.)])), NA, min(Year[!is.na(.)])),
+        maxYear = ~ ifelse(is.infinite(max(Year[!is.na(.)])), NA, max(Year[!is.na(.)])),
+        mean = ~ mean(., na.rm = TRUE),
+        median = ~ median(., na.rm = TRUE),
+        min = ~ ifelse(is.infinite(min(., na.rm = TRUE)), NA, min(., na.rm = TRUE)),
+        max = ~ ifelse(is.infinite(max(., na.rm = TRUE)), NA, max(., na.rm = TRUE)),
+        Nobs = ~ sum(!is.na(.)),
+        nYears = ~ n_distinct(Year[!is.na(.)])
+      ),
+      .names = "{.col}_{.fn}"     # 3. Specify the naming convention for the output columns. {.fn} references the names of the list elements.
+    )
+  )
+
+
+write_csv(metadata, "data/estuarine_data/estuary_metadata_summaryStats.csv")
+
+```
+
+# Subset Data for Trend Analysis
+
+```{r}
+# Function to subset data based on a minimum years of observations threshold. All station-variables in `data` have already been filtered to include only those with min 3 measurements per year (May-Oct). 
+# In this case, 5 years of observations is the threshold.
+subset_variable_data <- function(metadata_column, variable, threshold = 5) {
+  stations <- metadata %>%
+    filter(!!sym(metadata_column) >= threshold) %>%
+    pull(Station)
+  
+  return(data %>%
+           filter(Station %in% stations) %>%
+           filter(!is.na(!!sym(variable)))
+  )
+    
+}
+
+# Create the subset_data list using the function
+subset_data <- list(
+  CHLA = subset_variable_data("CHLA_nYears", "CHLA"),           
+  TN = subset_variable_data("TN_nYears", "TN"), 
+  DIN = subset_variable_data("DIN_nYears", "DIN"),
+  TP = subset_variable_data("TP_nYears", "TP"), 
+  TSS = subset_variable_data("TSS_nYears", "TSS"),
+  SECCHI = subset_variable_data("SECCHI_nYears", "SECCHI")
+)
+
+```
+
+# Derive May-Oct Averages by Station
+
+```{r}
+# Function to calculate the May-Oct average for each station-variable combination
+stationAvgs <- lapply(names(subset_data), function(var_name) {
+  subset_data[[var_name]] %>%
+    group_by(Station, Year) %>%
+    summarise(mean_value = mean(.data[[var_name]], na.rm = TRUE), 
+              .groups = "drop")
+})
+
+names(stationAvgs) <- names(subset_data)
+
+# Combine each variable's data into a single tibble with an added 'variable' column
+stationAvgs_combined <- bind_rows(
+  lapply(names(stationAvgs), function(var_name) {
+    stationAvgs[[var_name]] %>%
+      mutate(variable = var_name)  # Add a 'variable' column for identification
+  })
+)
+
+```
+
+# MBLM Trend Analysis
+
+Run a mblm trend analysis for each station across all available years, for each variable in the `subset_data` list. 
+
+```{r, warning = FALSE}
+  
+  modelSummaries <- list()  # Initialize list to store model results
+  stations <- unique(stationAvgs_combined$Station)  # Get unique station IDs
+  vars <- c("CHLA", "TN", "DIN", "TP", "TSS", "SECCHI")
+  
+  for (site in stations) {
+    site_trends <- list() # Initialize list to store trends for the current station
+  
+    df <- stationAvgs_combined %>%
+      filter(Station == site)  # Subset data for the current station
+    
+    for (var in vars) {
+      df.var <- df %>%
+        filter(variable == var)  # Subset data for the current variable
+      if (nrow(df.var > 0)) { # Check if there are observations for the current variable
+        model <- mblm::mblm(mean_value ~ Year, data = df.var)
+        mod.sum <- mblm::summary.mblm(model)
+        
+        # Store results
+        modelSummary <- list(
+          station = site,
+          variable = var,
+          slope = mod.sum$coefficients[2, 1],
+          MAD = mod.sum$coefficients["Year", "MAD"],
+          pvalue = mod.sum$coefficients["Year", 4],
+          intercept = mod.sum$coefficients[1, 1]
+        )
+        
+        site_trends[[paste(var)]] <- modelSummary  # Append to list
+      }
+    }
+    modelSummaries[[paste(site)]] <- site_trends  # Store trends for the current station
+  }
+
+
+```
+
+# Extract Regression Statistics
+
+```{r}
+regression_statistics <- list()
+
+for (station in names(modelSummaries)) {
+      
+  modelSums <- modelSummaries[[paste(station)]]
+  
+      reg.df <- data.frame(
+              Station = station,
+              variable = vars[vars %in% names(modelSums)],
+               model_slope = rep(NA, length(modelSums)),
+               model_MAD = rep(NA, length(modelSums)),
+               model_pval = rep(NA, length(modelSums)),
+               model_intercept = rep(NA, length(modelSums))
+      )
+      
+  for (i in seq_along(modelSums)) {
+      
+        p <- modelSums[[i]]
+      
+        reg.df$model_slope[i] <-  p$slope
+        reg.df$model_MAD[i] <-  p$MAD
+        reg.df$model_pval[i] <-  p$pvalue
+        reg.df$model_intercept[i] <-  p$intercept
+      }
+      
+      regression_statistics[[station]] <- reg.df
+}
+
+# ------- Create data frames from lists -------
+regressions_df <- bind_rows(regression_statistics) 
+
+regressions_df_wide <- regressions_df %>%
+  pivot_wider(
+    names_from = variable, 
+    values_from = c(model_slope, model_MAD, model_pval, model_intercept),
+    names_sep = "_"
+  ) %>%
+  # Reorder columns so all variables are grouped together column-wise
+  select(
+    Station,
+    contains("CHLA"),
+    contains("TN"),
+    contains("DIN"),
+    contains("TP"),
+    contains("TSS"),
+    contains("SECCHI")
+  )
+
+write_csv(regressions_df_wide, "data/estuarine_data/estuary_stationTrends.csv")
+
+```
+
+# Adjusted Y-intercept
+
+Because the model intercept is based on x=0, and the x-axes start around 1999, I create an adjusted model intercept based on the following formula:
+
+`adjusted_intercept = model_intercept + model_slope * min(Year)`
+
+This requires first determining the minimum year for each variable at each station
+
+```{r}
+minYear <- list()
+
+for (var in vars) {
+  
+  df.var <- stationAvgs[[var]]
+  minYear.var <- list()
+  
+  for (station in unique(df.var$Station)) {
+    
+    df <- df.var %>%
+      filter(Station == station)
+    
+    minYear.df <- data.frame(variable = var,
+                             Station = as.character(station),
+                             minYear = min(df$Year))
+    
+    minYear.var[[paste(var, station)]] <- minYear.df
+  }
+  
+  minYear[[var]] <- bind_rows(minYear.var)
+}
+
+minYear.df <- bind_rows(minYear)
+
+```
+
+Then use that data frame to calculate the adjusted intercept
+
+```{r}
+regressions_adjusted <- regressions_df %>%
+  left_join(minYear.df, by = c("Station", "variable")) %>%
+  mutate(adjusted_intercept = model_intercept + model_slope * minYear)
+
+```
+
+# Generate Plots
+
+```{r, fig.width=3, fig.height=4}
+library(ggplot2)
+# use regressions_adjusted along with the monthly averages list
+# monthly avg list structure: list[[station]]$variable  variable = df with Year, STATION_ID, MAY_OCT_AVG
+# recall that, due to thow the output of the `mblm` function is structured, it cannot be passed to geom_smooth as a smoothing function. This results in having to 'manually' draw the trend lines.
+# List to hold all plots 
+all_plots_list <- list()
+
+for (station in unique(regressions_adjusted$Station)) {
+  # Initiate list to store plots for this station
+  station_plots <- list()
+  
+  for (current_var in names(modelSummaries[[station]]))  {
+    df_avgs <- stationAvgs[[current_var]] %>%
+      filter(Station == station)
+    df_reg <- regressions_adjusted %>%
+      filter(variable == current_var, Station == station)
+    
+    var_plot <- ggplot(df_avgs, aes(x = Year, y = mean_value)) +
+      geom_point() +
+        # Use annotate() instead of geom_segment() for the trend line. ggplot expects each aesthetic  to be mapped to a column in the data, and geom_segment() - which I originally used - was receiving values (x, xend, y, and yend) that had only a single length (min and max). Also, aes() is designed to map aesthetics to a SINGLE dataframe, whereas this plot requires reference to two dfs to produce the trend lines.Using `annotate` eliminates the warning because it explicitly adds a line based on single values (rather than having ggplot2 try to match them to rows in df_avgs)
+      annotate("segment", x = min(df_avgs$Year), 
+               xend = max(df_avgs$Year), 
+               y = df_reg$adjusted_intercept, 
+               yend = 
+                 df_reg$adjusted_intercept + df_reg$model_slope * (max(df_avgs$Year) - min(df_avgs$Year)),
+               # calculate the y-value at the endpoint by adding the total change in y (slope * difference_in_years) to the intercept at the starting point
+               color = "red", linewidth = .42, alpha = .6) +
+      labs(title = current_var,
+           subtitle = paste("Slope: ", round(df_reg$model_slope, 5),
+                            "\np-value: ", round(df_reg$model_pval, 5)),
+           x = NULL, y = NULL) +
+      theme_minimal() +
+      theme(plot.title = element_text(face = "bold"))
+    
+    station_plots[[current_var]] <- var_plot
+  }
+
+  all_plots_list[[station]] <- station_plots
+}
+
+
+
+save(all_plots_list, file = "estuaryStations_all_plots_list.RData")
+
+```
+

@@ -563,7 +563,7 @@ metadata <- my_data %>%
     
     minYear_DIN = ifelse(is.infinite(min(Year[!is.na(DIN)])), NA, min(Year[!is.na(DIN)])),
     maxYear_DIN = ifelse(is.infinite(max(Year[!is.na(DIN)])), NA, max(Year[!is.na(DIN)])),
-    nYears_DIN = n_distinct(Year[!is.na(DIN)]),
+    nYears_DIN = n_distinct(Year[!is.na(DIN)])
   )
 
 
